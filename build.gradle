@@ -1,0 +1,74 @@
+buildscript {
+  repositories {
+    mavenCentral()
+    maven { url 'https://s01.oss.sonatype.org' }
+    gradlePluginPortal()
+    mavenLocal()
+    google()
+    maven { url 'https://oss.sonatype.org/content/repositories/snapshots/' }
+    maven { url 'https://s01.oss.sonatype.org/content/repositories/snapshots/' }
+  }
+  dependencies {
+    classpath "io.freefair.gradle:lombok-plugin:8.3"
+  }
+}
+
+allprojects {
+  apply plugin: 'eclipse'
+  apply plugin: 'idea'
+
+  repositories {
+    google()
+    mavenCentral()
+    maven { url 'https://jitpack.io' } // ✅ this ensures Guacamole is resolved
+    maven { url 'https://s01.oss.sonatype.org/content/repositories/releases/' }
+    maven { url 'https://oss.sonatype.org/content/repositories/snapshots/' }
+    maven { url 'https://s01.oss.sonatype.org/content/repositories/snapshots/' }
+    mavenLocal()
+  }
+
+  idea {
+    module {
+      outputDir file('build/classes/java/main')
+      testOutputDir file('build/classes/java/test')
+    }
+  }
+}
+
+configure(subprojects) {
+  apply plugin: 'java-library'
+  apply plugin: 'io.freefair.lombok'
+
+  java {
+    toolchain {
+      languageVersion = JavaLanguageVersion.of(21)
+    }
+  }
+
+  sourceCompatibility = JavaVersion.VERSION_21
+  targetCompatibility = JavaVersion.VERSION_21
+
+  tasks.register('generateAssetList') {
+    inputs.dir("${project.rootDir}/assets/")
+    File assetsFolder = new File("${project.rootDir}/assets/")
+    File assetsFile = new File(assetsFolder, "assets.txt")
+    assetsFile.delete()
+
+    fileTree(assetsFolder).collect { assetsFolder.relativePath(it) }.sort().each {
+      assetsFile.append(it + "\n")
+    }
+  }
+  processResources.dependsOn 'generateAssetList'
+
+  compileJava {
+    options.incremental = true
+  }
+}
+
+
+subprojects {
+  version = "$projectVersion"
+  ext.appName = 'ArkTec'
+}
+
+eclipse.project.name = 'ArkTec'
