@@ -1,9 +1,10 @@
-package com.whodundid.artifactRun;
+package com.whodundid.artifactRun.screen;
 
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.utils.viewport.FitViewport;
 import com.badlogic.gdx.utils.viewport.Viewport;
+import com.whodundid.artifactRun.ArtifactRun;
 
 public abstract class BaseScreen implements Screen {
     

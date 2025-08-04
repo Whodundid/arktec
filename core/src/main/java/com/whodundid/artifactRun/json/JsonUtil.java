@@ -1,4 +1,4 @@
-package com.whodundid.artifactRun.ecs.util;
+package com.whodundid.artifactRun.json;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -6,6 +6,12 @@ import java.util.regex.Pattern;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonSyntaxException;
+import com.whodundid.artifactRun.ecs.json.EntityComponentDeserializer;
+import com.whodundid.artifactRun.ecs.json.EntityComponentSerializer;
+import com.whodundid.artifactRun.ecs.util.AbstractEntityComponent;
+import com.whodundid.artifactRun.world.json.WorldTileComponentDeserializer;
+import com.whodundid.artifactRun.world.json.WorldTileComponentSerializer;
+import com.whodundid.artifactRun.world.util.AbstractWorldTileComponent;
 
 import eutil.datatypes.util.EList;
 
@@ -18,7 +24,10 @@ public class JsonUtil {
     public static final Gson GSON = new GsonBuilder()
         .registerTypeAdapter(AbstractEntityComponent.class, new EntityComponentDeserializer())
         .registerTypeAdapter(AbstractEntityComponent.class, new EntityComponentSerializer())
+        .registerTypeAdapter(AbstractWorldTileComponent.class, new WorldTileComponentDeserializer())
+        .registerTypeAdapter(AbstractWorldTileComponent.class, new WorldTileComponentSerializer())
         .registerTypeAdapter(EList.class, new EListInstanceCreator())
+        .enableComplexMapKeySerialization()
         .setPrettyPrinting()
         .create();
     

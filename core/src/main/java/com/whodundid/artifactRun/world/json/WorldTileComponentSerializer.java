@@ -1,4 +1,4 @@
-package com.whodundid.artifactRun.ecs.util;
+package com.whodundid.artifactRun.world.json;
 
 import java.lang.reflect.Type;
 import java.util.Map;
@@ -7,11 +7,12 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSerializationContext;
 import com.google.gson.JsonSerializer;
+import com.whodundid.artifactRun.world.util.AbstractWorldTileComponent;
 
-public class EntityComponentSerializer implements JsonSerializer<AbstractEntityComponent> {
+public class WorldTileComponentSerializer implements JsonSerializer<AbstractWorldTileComponent> {
     
     @Override
-    public JsonElement serialize(AbstractEntityComponent src, Type typeOfSrc, JsonSerializationContext context) {
+    public JsonElement serialize(AbstractWorldTileComponent src, Type typeOfSrc, JsonSerializationContext context) {
         JsonObject original = context.serialize(src).getAsJsonObject();
         JsonObject result = new JsonObject();
 

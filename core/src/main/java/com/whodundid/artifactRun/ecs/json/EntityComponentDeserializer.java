@@ -1,4 +1,4 @@
-package com.whodundid.artifactRun.ecs.util;
+package com.whodundid.artifactRun.ecs.json;
 
 import java.lang.reflect.Type;
 
@@ -8,6 +8,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.whodundid.artifactRun.ecs.EntityComponentRegistry;
+import com.whodundid.artifactRun.ecs.util.AbstractEntityComponent;
 
 public class EntityComponentDeserializer implements JsonDeserializer<AbstractEntityComponent> {
     

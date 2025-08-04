@@ -1,4 +1,4 @@
-package com.whodundid.artifactRun.ecs.util;
+package com.whodundid.artifactRun.json;
 
 import java.lang.reflect.Type;
 

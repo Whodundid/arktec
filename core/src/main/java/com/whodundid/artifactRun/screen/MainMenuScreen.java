@@ -1,11 +1,12 @@
-package com.whodundid.artifactRun;
+package com.whodundid.artifactRun.screen;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.utils.ScreenUtils;
-import com.whodundid.artifactRun.util.RenderUtils;
+import com.whodundid.artifactRun.ArtifactRun;
+import com.whodundid.artifactRun.rendering.RenderUtils;
 
 public class MainMenuScreen extends BaseScreen {
     

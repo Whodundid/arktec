@@ -1,4 +1,4 @@
-package com.whodundid.artifactRun.util;
+package com.whodundid.artifactRun.rendering;
 
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;

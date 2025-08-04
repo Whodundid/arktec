@@ -1,40 +1,40 @@
-package com.whodundid.artifactRun.ecs;
+package com.whodundid.artifactRun.world;
 
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-import com.whodundid.artifactRun.ecs.util.AbstractEntityComponent;
 import com.whodundid.artifactRun.json.JsonUtil;
+import com.whodundid.artifactRun.world.util.AbstractWorldTileComponent;
 
 import eutil.datatypes.util.EList;
 import eutil.strings.EStringUtil;
 
-public class Entity {   
+public class WorldTile {
     
     //========
     // Fields
     //========
     
-    private final String entityId;
-    private final EList<AbstractEntityComponent> componentList = EList.newList();
+    private final String tileId;
+    private final EList<AbstractWorldTileComponent> componentList = EList.newList();
     public final transient Map<String, Class<?>> componentTypeMap = new HashMap<>();
-    private final transient Map<Class<?>, AbstractEntityComponent> componentMap = new HashMap<>();
+    private final transient Map<Class<?>, AbstractWorldTileComponent> componentMap = new HashMap<>();
     
     //==============
     // Constructors
     //==============
     
-    public Entity() {
-        this.entityId = UUID.randomUUID().toString();
+    public WorldTile() {
+        this.tileId = UUID.randomUUID().toString();
     }
     
-    public Entity(Entity other) {
+    public WorldTile(WorldTile other) {
         this();
         
         var compList = other.componentList;
-        for (AbstractEntityComponent c : compList) {
+        for (AbstractWorldTileComponent c : compList) {
             addComponent(c.copy());
         }
     }
@@ -45,7 +45,7 @@ public class Entity {
     
     @Override
     public String toString() {
-        return "Entity{id=" + entityId + ", components=" + componentTypeMap.keySet() + "}";
+        return "WorldTile{id=" + tileId + ", components=" + componentTypeMap.keySet() + "}";
     }
     
     //=========
@@ -65,7 +65,7 @@ public class Entity {
         componentMap.remove(componentClass);
     }
     
-    public <T extends AbstractEntityComponent> void addComponent(T component) {
+    public <T extends AbstractWorldTileComponent> void addComponent(T component) {
         // prevent null components from being added
         if (component == null) return;
         
@@ -96,31 +96,31 @@ public class Entity {
     // Static Helper Methods
     //=======================
     
-    public static Entity fromJson(String jsonString) {
-        Entity entity = JsonUtil.fromJson(jsonString, Entity.class);
-        entity.buildComponentMap();
-        return entity;
+    public static WorldTile fromJson(String jsonString) {
+        WorldTile tile = JsonUtil.fromJson(jsonString, WorldTile.class);
+        tile.buildComponentMap();
+        return tile;
     }
     
     //=========
     // Getters
     //=========
     
-    public String getEntityId() {
-        return entityId;
+    public String getTileId() {
+        return tileId;
     }
     
-    public <T extends AbstractEntityComponent> T getComponent(Class<T> componentClass) {
+    public <T extends AbstractWorldTileComponent> T getComponent(Class<T> componentClass) {
         return componentClass.cast(componentMap.get(componentClass));
     }
     
-    public <T extends AbstractEntityComponent> T getComponent(String componentTypeName) {
+    public <T extends AbstractWorldTileComponent> T getComponent(String componentTypeName) {
         // garbage in -- garbage out
         if (EStringUtil.isNotPopulated(componentTypeName)) return null;
         Class<?> componentClass = componentTypeMap.get(componentTypeName);
         // don't care if there isn't a class for it
         if (componentClass == null) return null;
-        AbstractEntityComponent comp = componentMap.get(componentClass);
+        AbstractWorldTileComponent comp = componentMap.get(componentClass);
         // if the comp is null, this is weird because we *somehow* have it registered -- so why is it null?!
         if (comp == null) throw new IllegalStateException("We somehow have a reference of a '" + componentTypeName
                                                           + "' but there somehow isn't a component for it!");
@@ -130,12 +130,13 @@ public class Entity {
         return (T) componentClass.cast(comp);
     }
     
-    public Map<Class<?>, AbstractEntityComponent> getComponentMap() {
+    public Map<Class<?>, AbstractWorldTileComponent> getComponentMap() {
         return Collections.unmodifiableMap(componentMap);
     }
     
-    public EList<AbstractEntityComponent> getComponentList() {
+    public EList<AbstractWorldTileComponent> getComponentList() {
         return componentList.toUnmodifiableList();
     }
     
 }
+
