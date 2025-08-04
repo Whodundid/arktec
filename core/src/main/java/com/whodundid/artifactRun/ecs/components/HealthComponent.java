@@ -1,29 +1,29 @@
 package com.whodundid.artifactRun.ecs.components;
 
-import com.whodundid.artifactRun.ecs.EntityComponent;
+import com.whodundid.artifactRun.ecs.IEntityComponent;
 
-public class HealthComponent implements EntityComponent {
+public class HealthComponent implements IEntityComponent {
     
     //========
     // Fields
     //========
     
-    public int health;
     public int maxHealth;
+    public int health;
     
     //==============
     // Constructors
     //==============
     
     public HealthComponent() {}
-    public HealthComponent(int health, int maxHealth) {
-        this.health = health;
+    public HealthComponent(int maxHealth, int health) {
         this.maxHealth = maxHealth;
+        this.health = health;
     }
     
     public HealthComponent(HealthComponent comp) {
-        this.health = comp.health;
         this.maxHealth = comp.maxHealth;
+        this.health = comp.health;
     }
     
     //===========
@@ -36,7 +36,7 @@ public class HealthComponent implements EntityComponent {
     }
     
     @Override
-    public EntityComponent copy() {
+    public IEntityComponent copy() {
         return new HealthComponent(this);
     }
     

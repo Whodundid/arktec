@@ -2,28 +2,25 @@ package com.whodundid.artifactRun.ecs.components;
 
 import com.whodundid.artifactRun.ecs.IEntityComponent;
 
-public class SizeComponent implements IEntityComponent {
+public class CollisionComponent implements IEntityComponent {
     
     //========
     // Fields
     //========
     
-    public float width;
-    public float height;
+    public boolean isSolid = true;
     
     //==============
     // Constructors
     //==============
     
-    public SizeComponent() {}
-    public SizeComponent(float width, float height) {
-        this.width = width;
-        this.height = height;
+    public CollisionComponent() {}
+    public CollisionComponent(boolean isSolid) {
+        this.isSolid = isSolid;
     }
     
-    public SizeComponent(SizeComponent comp) {
-        this.width = comp.width;
-        this.height = comp.height;
+    public CollisionComponent(CollisionComponent comp) {
+        this.isSolid = comp.isSolid;
     }
     
     //===========
@@ -32,12 +29,12 @@ public class SizeComponent implements IEntityComponent {
     
     @Override
     public String getTypeName() {
-        return "size";
+        return "collision";
     }
     
     @Override
     public IEntityComponent copy() {
-        return new SizeComponent(this);
+        return new CollisionComponent(this);
     }
     
 }

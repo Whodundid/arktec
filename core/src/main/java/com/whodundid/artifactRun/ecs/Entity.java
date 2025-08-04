@@ -16,8 +16,8 @@ public class Entity {
     //========
     
     private final String entityId;
-    private final EList<EntityComponent> componentList = EList.newList();
-    private final transient Map<Class<?>, EntityComponent> componentMap = new HashMap<>();
+    private final EList<IEntityComponent> componentList = EList.newList();
+    private final transient Map<Class<?>, IEntityComponent> componentMap = new HashMap<>();
     
     //==============
     // Constructors
@@ -31,7 +31,7 @@ public class Entity {
         this();
         
         var compList = other.componentList;
-        for (EntityComponent c : compList) {
+        for (IEntityComponent c : compList) {
             addComponent(c.copy());
         }
     }
@@ -58,7 +58,7 @@ public class Entity {
         componentMap.remove(componentClass);
     }
     
-    public <T extends EntityComponent> void addComponent(T component) {
+    public <T extends IEntityComponent> void addComponent(T component) {
         // prevent null components from being added
         if (component == null) return;
         
@@ -103,15 +103,15 @@ public class Entity {
         return entityId;
     }
     
-    public <T extends EntityComponent> T getComponent(Class<T> componentClass) {
+    public <T extends IEntityComponent> T getComponent(Class<T> componentClass) {
         return componentClass.cast(componentMap.get(componentClass));
     }
     
-    public Map<Class<?>, EntityComponent> getComponentMap() {
+    public Map<Class<?>, IEntityComponent> getComponentMap() {
         return Collections.unmodifiableMap(componentMap);
     }
     
-    public EList<EntityComponent> getComponentList() {
+    public EList<IEntityComponent> getComponentList() {
         return componentList.toUnmodifiableList();
     }
     

@@ -1,9 +1,9 @@
 package com.whodundid.artifactRun.ecs;
 
-public interface EntityComponent {
+public interface IEntityComponent {
     
     String getTypeName();
     
-    EntityComponent copy();
+    IEntityComponent copy();
     
 }

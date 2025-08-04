@@ -1,29 +1,26 @@
 package com.whodundid.artifactRun.ecs.components;
 
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.whodundid.artifactRun.ecs.IEntityComponent;
 
-public class SizeComponent implements IEntityComponent {
+public class RenderComponent implements IEntityComponent {
     
     //========
     // Fields
     //========
     
-    public float width;
-    public float height;
+    public TextureRegion sprite;
     
     //==============
     // Constructors
     //==============
     
-    public SizeComponent() {}
-    public SizeComponent(float width, float height) {
-        this.width = width;
-        this.height = height;
+    public RenderComponent(TextureRegion sprite) {
+        this.sprite = sprite;
     }
     
-    public SizeComponent(SizeComponent comp) {
-        this.width = comp.width;
-        this.height = comp.height;
+    public RenderComponent(RenderComponent comp) {
+        this.sprite = comp.sprite;
     }
     
     //===========
@@ -32,12 +29,12 @@ public class SizeComponent implements IEntityComponent {
     
     @Override
     public String getTypeName() {
-        return "size";
+        return "render";
     }
     
     @Override
     public IEntityComponent copy() {
-        return new SizeComponent(this);
+        return new RenderComponent(this);
     }
     
 }

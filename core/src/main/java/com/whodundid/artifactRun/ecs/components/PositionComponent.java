@@ -1,8 +1,8 @@
 package com.whodundid.artifactRun.ecs.components;
 
-import com.whodundid.artifactRun.ecs.EntityComponent;
+import com.whodundid.artifactRun.ecs.IEntityComponent;
 
-public class PositionComponent implements EntityComponent {
+public class PositionComponent implements IEntityComponent {
     
     //========
     // Fields
@@ -36,7 +36,7 @@ public class PositionComponent implements EntityComponent {
     }
     
     @Override
-    public EntityComponent copy() {
+    public IEntityComponent copy() {
         return new PositionComponent(this);
     }
     

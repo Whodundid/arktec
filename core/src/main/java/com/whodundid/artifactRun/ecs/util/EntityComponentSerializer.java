@@ -7,12 +7,12 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSerializationContext;
 import com.google.gson.JsonSerializer;
-import com.whodundid.artifactRun.ecs.EntityComponent;
+import com.whodundid.artifactRun.ecs.IEntityComponent;
 
-public class EntityComponentSerializer implements JsonSerializer<EntityComponent> {
+public class EntityComponentSerializer implements JsonSerializer<IEntityComponent> {
     
     @Override
-    public JsonElement serialize(EntityComponent src, Type typeOfSrc, JsonSerializationContext context) {
+    public JsonElement serialize(IEntityComponent src, Type typeOfSrc, JsonSerializationContext context) {
         JsonObject original = context.serialize(src).getAsJsonObject();
         JsonObject result = new JsonObject();
 

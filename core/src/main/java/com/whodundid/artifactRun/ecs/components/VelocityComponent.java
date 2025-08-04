@@ -2,28 +2,28 @@ package com.whodundid.artifactRun.ecs.components;
 
 import com.whodundid.artifactRun.ecs.IEntityComponent;
 
-public class SizeComponent implements IEntityComponent {
+public class VelocityComponent implements IEntityComponent {
     
     //========
     // Fields
     //========
     
-    public float width;
-    public float height;
+    public transient float vx;
+    public transient float vy;
     
     //==============
     // Constructors
     //==============
     
-    public SizeComponent() {}
-    public SizeComponent(float width, float height) {
-        this.width = width;
-        this.height = height;
+    public VelocityComponent() {}
+    public VelocityComponent(float vx, float vy) {
+        this.vx = vx;
+        this.vy = vy;
     }
     
-    public SizeComponent(SizeComponent comp) {
-        this.width = comp.width;
-        this.height = comp.height;
+    public VelocityComponent(VelocityComponent comp) {
+        this.vx = comp.vx;
+        this.vy = comp.vy;
     }
     
     //===========
@@ -32,12 +32,12 @@ public class SizeComponent implements IEntityComponent {
     
     @Override
     public String getTypeName() {
-        return "size";
+        return "velocity";
     }
     
     @Override
     public IEntityComponent copy() {
-        return new SizeComponent(this);
+        return new VelocityComponent(this);
     }
     
 }
