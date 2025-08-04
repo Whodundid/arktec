@@ -37,8 +37,8 @@ public class GameLevelDirectory {
     // root level dir
     //----------------
     
-    /** The game level's data file. */
-    private File levelDataFile;
+    /** The game level's info file. */
+    private File levelInfoFile;
     /** A preview image for the save. */
     private File levelPreviewImageFile;
     /** A settings file for this level specifically. */
@@ -83,11 +83,11 @@ public class GameLevelDirectory {
         createDirectory(gameLevelDirectory);
         
         // root level files
-        levelDataFile = new File(gameLevelDirectory, "level.json");
+        levelInfoFile = new File(gameLevelDirectory, "level.json");
         levelSettingsFile = new File(gameLevelDirectory, "level_settings.json");
         levelPreviewImageFile = new File(gameLevelDirectory, "level_preview.png");
         
-        createFile(levelDataFile);
+        createFile(levelInfoFile);
         createFile(levelSettingsFile);
         // we won't create the preview image until there's something to write
         
@@ -169,7 +169,7 @@ public class GameLevelDirectory {
     public File getLevelDir() { return gameLevelDirectory; }
     
     // root level dir stuff
-    public File getLevelDataFile() { return levelDataFile; }
+    public File getLevelInfoFile() { return levelInfoFile; }
     public File getLevelSettingsFile() { return levelSettingsFile; }
     public File getLevelPreviewImageFile() { return levelPreviewImageFile; }
     public File getLevelDataDir() { return dataDir; }

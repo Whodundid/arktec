@@ -22,7 +22,7 @@ class GameLevelDirectoryTest {
         GameLevelDirectory dir = new GameLevelDirectory(levelDir);
 
         assertTrue(dir.getLevelDir().exists());
-        assertTrue(dir.getLevelDataFile().exists());
+        assertTrue(dir.getLevelInfoFile().exists());
         assertTrue(dir.getLevelSettingsFile().exists());
 
         assertTrue(dir.getLevelDataDir().exists());

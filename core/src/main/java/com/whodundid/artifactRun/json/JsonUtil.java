@@ -9,9 +9,9 @@ import com.google.gson.JsonSyntaxException;
 import com.whodundid.artifactRun.ecs.json.EntityComponentDeserializer;
 import com.whodundid.artifactRun.ecs.json.EntityComponentSerializer;
 import com.whodundid.artifactRun.ecs.util.AbstractEntityComponent;
-import com.whodundid.artifactRun.level.world.tile.json.WorldTileComponentDeserializer;
-import com.whodundid.artifactRun.level.world.tile.json.WorldTileComponentSerializer;
-import com.whodundid.artifactRun.level.world.tile.util.AbstractWorldTileComponent;
+import com.whodundid.artifactRun.world.tile.json.WorldTileComponentDeserializer;
+import com.whodundid.artifactRun.world.tile.json.WorldTileComponentSerializer;
+import com.whodundid.artifactRun.world.tile.util.AbstractWorldTileComponent;
 
 import eutil.datatypes.util.EList;
 
