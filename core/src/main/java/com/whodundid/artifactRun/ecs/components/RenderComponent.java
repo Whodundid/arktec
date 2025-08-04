@@ -1,9 +1,16 @@
 package com.whodundid.artifactRun.ecs.components;
 
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
-import com.whodundid.artifactRun.ecs.IEntityComponent;
+import com.whodundid.artifactRun.ecs.AbstractEntityComponent;
+import com.whodundid.artifactRun.ecs.EntityComponentType;
 
-public class RenderComponent implements IEntityComponent {
+public class RenderComponent extends AbstractEntityComponent {
+    
+    //===============
+    // Static Fields
+    //===============
+    
+    public static final EntityComponentType COMPONENT_TYPE = EntityComponentType.RENDER;
     
     //========
     // Fields
@@ -16,10 +23,14 @@ public class RenderComponent implements IEntityComponent {
     //==============
     
     public RenderComponent(TextureRegion sprite) {
+        super(COMPONENT_TYPE);
+        
         this.sprite = sprite;
     }
     
     public RenderComponent(RenderComponent comp) {
+        super(COMPONENT_TYPE);
+        
         this.sprite = comp.sprite;
     }
     
@@ -28,12 +39,7 @@ public class RenderComponent implements IEntityComponent {
     //===========
     
     @Override
-    public String getTypeName() {
-        return "render";
-    }
-    
-    @Override
-    public IEntityComponent copy() {
+    public RenderComponent copy() {
         return new RenderComponent(this);
     }
     

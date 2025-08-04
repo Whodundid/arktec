@@ -1,8 +1,15 @@
 package com.whodundid.artifactRun.ecs.components;
 
-import com.whodundid.artifactRun.ecs.IEntityComponent;
+import com.whodundid.artifactRun.ecs.AbstractEntityComponent;
+import com.whodundid.artifactRun.ecs.EntityComponentType;
 
-public class InputComponent implements IEntityComponent {
+public class InputComponent extends AbstractEntityComponent {
+    
+    //===============
+    // Static Fields
+    //===============
+    
+    public static final EntityComponentType COMPONENT_TYPE = EntityComponentType.INPUT;
     
     //========
     // Fields
@@ -15,8 +22,10 @@ public class InputComponent implements IEntityComponent {
     // Constructors
     //==============
     
-    public InputComponent() {}
+    public InputComponent() { this(false, false, false, false, false); }
     public InputComponent(boolean up, boolean down, boolean left, boolean right, boolean shoot) {
+        super(COMPONENT_TYPE);
+        
         this.up = up;
         this.down = down;
         this.left = left;
@@ -25,6 +34,8 @@ public class InputComponent implements IEntityComponent {
     }
 
     public InputComponent(InputComponent other) {
+        super(COMPONENT_TYPE);
+        
         this.up = other.up;
         this.down = other.down;
         this.left = other.left;
@@ -37,12 +48,7 @@ public class InputComponent implements IEntityComponent {
     //===========
 
     @Override
-    public String getTypeName() {
-        return "input";
-    }
-
-    @Override
-    public IEntityComponent copy() {
+    public InputComponent copy() {
         return new InputComponent(this);
     }
 

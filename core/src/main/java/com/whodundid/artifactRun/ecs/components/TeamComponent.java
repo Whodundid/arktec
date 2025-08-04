@@ -1,8 +1,15 @@
 package com.whodundid.artifactRun.ecs.components;
 
-import com.whodundid.artifactRun.ecs.IEntityComponent;
+import com.whodundid.artifactRun.ecs.AbstractEntityComponent;
+import com.whodundid.artifactRun.ecs.EntityComponentType;
 
-public class TeamComponent implements IEntityComponent {
+public class TeamComponent extends AbstractEntityComponent {
+    
+    //===============
+    // Static Fields
+    //===============
+    
+    public static final EntityComponentType COMPONENT_TYPE = EntityComponentType.TEAM;
     
     //================
     // Static Classes
@@ -18,18 +25,22 @@ public class TeamComponent implements IEntityComponent {
     // Fields
     //========
     
-    public Team team = Team.NEUTRAL;
+    public Team team;
     
     //==============
     // Constructors
     //==============
     
-    public TeamComponent() {}
+    public TeamComponent() { this(Team.NEUTRAL); }
     public TeamComponent(Team team) {
+        super(COMPONENT_TYPE);
+        
         this.team = team;
     }
     
     public TeamComponent(TeamComponent comp) {
+        super(COMPONENT_TYPE);
+        
         this.team = comp.team;
     }
     
@@ -38,12 +49,7 @@ public class TeamComponent implements IEntityComponent {
     //===========
     
     @Override
-    public String getTypeName() {
-        return "team";
-    }
-    
-    @Override
-    public IEntityComponent copy() {
+    public TeamComponent copy() {
         return new TeamComponent(this);
     }
     

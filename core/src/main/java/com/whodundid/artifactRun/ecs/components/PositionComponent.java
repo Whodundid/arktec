@@ -1,8 +1,15 @@
 package com.whodundid.artifactRun.ecs.components;
 
-import com.whodundid.artifactRun.ecs.IEntityComponent;
+import com.whodundid.artifactRun.ecs.AbstractEntityComponent;
+import com.whodundid.artifactRun.ecs.EntityComponentType;
 
-public class PositionComponent implements IEntityComponent {
+public class PositionComponent extends AbstractEntityComponent {
+    
+    //===============
+    // Static Fields
+    //===============
+    
+    public static final EntityComponentType COMPONENT_TYPE = EntityComponentType.POSITION;
     
     //========
     // Fields
@@ -15,13 +22,17 @@ public class PositionComponent implements IEntityComponent {
     // Constructors
     //==============
     
-    public PositionComponent() {}
+    public PositionComponent() { this(0f, 0f); }
     public PositionComponent(float x, float y) {
+        super(COMPONENT_TYPE);
+        
         this.x = x;
         this.y = y;
     }
     
     public PositionComponent(PositionComponent comp) {
+        super(COMPONENT_TYPE);
+        
         this.x = comp.x;
         this.y = comp.y;
     }
@@ -31,12 +42,7 @@ public class PositionComponent implements IEntityComponent {
     //===========
     
     @Override
-    public String getTypeName() {
-        return "position";
-    }
-    
-    @Override
-    public IEntityComponent copy() {
+    public PositionComponent copy() {
         return new PositionComponent(this);
     }
     

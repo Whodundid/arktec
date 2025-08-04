@@ -110,9 +110,16 @@ public class EntityTest {
         entity.addComponent(new VelocityComponent(3, 4));
 
         String json = entity.toJson();
-
-        assertFalse(json.contains("input"), "Transient InputComponent should not be serialized");
-        assertTrue(json.contains("velocity"));
+        System.out.println(json);
+        Entity deserialized = Entity.fromJson(json);
+        
+        assertTrue(deserialized.hasComponent(InputComponent.class));
+        assertTrue(deserialized.hasComponent(VelocityComponent.class));
+        
+        InputComponent ic = deserialized.getComponent(InputComponent.class);
+        
+        assertFalse(ic.shoot, "Transient InputComponent fields should not have be serialized");
+        assertTrue(json.contains("VELOCITY"));
     }
 
     @Test

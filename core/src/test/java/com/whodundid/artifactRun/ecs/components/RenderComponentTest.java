@@ -3,6 +3,7 @@ package com.whodundid.artifactRun.ecs.components;
 import static org.junit.jupiter.api.Assertions.*;
 import org.junit.jupiter.api.Test;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.whodundid.artifactRun.ecs.EntityComponentType;
 
 public class RenderComponentTest {
 
@@ -33,9 +34,9 @@ public class RenderComponentTest {
     }
 
     @Test
-    void getTypeName_returnsCorrectString() {
+    void getTypeName_returnsCorrectComponetType() {
         TextureRegion mockSprite = new TextureRegion();
-        assertEquals("render", new RenderComponent(mockSprite).getTypeName());
+        assertEquals(EntityComponentType.RENDER, new RenderComponent(mockSprite).getComponentType());
     }
     
 }

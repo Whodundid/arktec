@@ -3,6 +3,8 @@ package com.whodundid.artifactRun.ecs.components;
 import static org.junit.jupiter.api.Assertions.*;
 import org.junit.jupiter.api.Test;
 
+import com.whodundid.artifactRun.ecs.EntityComponentType;
+
 public class SizeComponentTest {
 
     @Test
@@ -39,8 +41,8 @@ public class SizeComponentTest {
     }
 
     @Test
-    void getTypeName_returnsCorrectString() {
-        assertEquals("size", new SizeComponent().getTypeName());
+    void getTypeName_returnsCorrectComponetType() {
+        assertEquals(EntityComponentType.SIZE, new SizeComponent().getComponentType());
     }
     
 }

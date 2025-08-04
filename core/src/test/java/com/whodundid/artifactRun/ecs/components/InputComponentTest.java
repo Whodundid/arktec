@@ -3,6 +3,8 @@ package com.whodundid.artifactRun.ecs.components;
 import static org.junit.jupiter.api.Assertions.*;
 import org.junit.jupiter.api.Test;
 
+import com.whodundid.artifactRun.ecs.EntityComponentType;
+
 public class InputComponentTest {
 
     @Test
@@ -52,8 +54,8 @@ public class InputComponentTest {
     }
 
     @Test
-    void getTypeName_returnsCorrectString() {
-        assertEquals("input", new InputComponent().getTypeName());
+    void getTypeName_returnsCorrectComponetType() {
+        assertEquals(EntityComponentType.INPUT, new InputComponent().getComponentType());
     }
     
 }

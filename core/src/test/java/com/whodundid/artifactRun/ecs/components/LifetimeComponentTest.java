@@ -3,6 +3,8 @@ package com.whodundid.artifactRun.ecs.components;
 import static org.junit.jupiter.api.Assertions.*;
 import org.junit.jupiter.api.Test;
 
+import com.whodundid.artifactRun.ecs.EntityComponentType;
+
 public class LifetimeComponentTest {
 
     @Test
@@ -29,8 +31,8 @@ public class LifetimeComponentTest {
     }
 
     @Test
-    void getTypeName_returnsCorrectString() {
-        assertEquals("lifetime", new LifetimeComponent(1.0f).getTypeName());
+    void getTypeName_returnsCorrectComponetType() {
+        assertEquals(EntityComponentType.LIFETIME, new LifetimeComponent(1.0f).getComponentType());
     }
     
 }

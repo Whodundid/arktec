@@ -1,8 +1,15 @@
 package com.whodundid.artifactRun.ecs.components;
 
-import com.whodundid.artifactRun.ecs.IEntityComponent;
+import com.whodundid.artifactRun.ecs.AbstractEntityComponent;
+import com.whodundid.artifactRun.ecs.EntityComponentType;
 
-public class LifetimeComponent implements IEntityComponent {
+public class LifetimeComponent extends AbstractEntityComponent {
+    
+    //===============
+    // Static Fields
+    //===============
+    
+    public static final EntityComponentType COMPONENT_TYPE = EntityComponentType.LIFETIME;
     
     //========
     // Fields
@@ -15,17 +22,17 @@ public class LifetimeComponent implements IEntityComponent {
     // Constructors
     //==============
     
-    public LifetimeComponent(float maxLifetime) {
-        this.maxLifetime = maxLifetime;
-        this.timeRemaining = maxLifetime;
-    }
-    
+    public LifetimeComponent(float maxLifetime) { this(maxLifetime, maxLifetime); }
     public LifetimeComponent(float maxLifetime, float timeRemaining) {
+        super(COMPONENT_TYPE);
+        
         this.maxLifetime = maxLifetime;
         this.timeRemaining = timeRemaining;
     }
     
     public LifetimeComponent(LifetimeComponent comp) {
+        super(COMPONENT_TYPE);
+        
         this.maxLifetime = comp.maxLifetime;
         this.timeRemaining = comp.timeRemaining;
     }
@@ -35,12 +42,7 @@ public class LifetimeComponent implements IEntityComponent {
     //===========
     
     @Override
-    public String getTypeName() {
-        return "lifetime";
-    }
-    
-    @Override
-    public IEntityComponent copy() {
+    public LifetimeComponent copy() {
         return new LifetimeComponent(this);
     }
     

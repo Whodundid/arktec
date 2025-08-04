@@ -6,7 +6,7 @@ import java.util.regex.Pattern;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonSyntaxException;
-import com.whodundid.artifactRun.ecs.IEntityComponent;
+import com.whodundid.artifactRun.ecs.AbstractEntityComponent;
 
 import eutil.datatypes.util.EList;
 
@@ -17,8 +17,8 @@ public class JsonUtil {
     //===============
     
     public static final Gson GSON = new GsonBuilder()
-        .registerTypeAdapter(IEntityComponent.class, new EntityComponentDeserializer())
-        .registerTypeAdapter(IEntityComponent.class, new EntityComponentSerializer())
+        .registerTypeAdapter(AbstractEntityComponent.class, new EntityComponentDeserializer())
+        .registerTypeAdapter(AbstractEntityComponent.class, new EntityComponentSerializer())
         .registerTypeAdapter(EList.class, new EListInstanceCreator())
         .setPrettyPrinting()
         .create();

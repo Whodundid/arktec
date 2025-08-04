@@ -1,8 +1,15 @@
 package com.whodundid.artifactRun.ecs.components;
 
-import com.whodundid.artifactRun.ecs.IEntityComponent;
+import com.whodundid.artifactRun.ecs.AbstractEntityComponent;
+import com.whodundid.artifactRun.ecs.EntityComponentType;
 
-public class VelocityComponent implements IEntityComponent {
+public class VelocityComponent extends AbstractEntityComponent {
+    
+    //===============
+    // Static Fields
+    //===============
+    
+    public static final EntityComponentType COMPONENT_TYPE = EntityComponentType.VELOCITY;
     
     //========
     // Fields
@@ -15,13 +22,17 @@ public class VelocityComponent implements IEntityComponent {
     // Constructors
     //==============
     
-    public VelocityComponent() {}
+    public VelocityComponent() { this(0f, 0f); }
     public VelocityComponent(float vx, float vy) {
+        super(COMPONENT_TYPE);
+        
         this.vx = vx;
         this.vy = vy;
     }
     
     public VelocityComponent(VelocityComponent comp) {
+        super(COMPONENT_TYPE);
+        
         this.vx = comp.vx;
         this.vy = comp.vy;
     }
@@ -31,12 +42,7 @@ public class VelocityComponent implements IEntityComponent {
     //===========
     
     @Override
-    public String getTypeName() {
-        return "velocity";
-    }
-    
-    @Override
-    public IEntityComponent copy() {
+    public VelocityComponent copy() {
         return new VelocityComponent(this);
     }
     

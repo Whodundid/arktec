@@ -1,8 +1,15 @@
 package com.whodundid.artifactRun.ecs.components;
 
-import com.whodundid.artifactRun.ecs.IEntityComponent;
+import com.whodundid.artifactRun.ecs.AbstractEntityComponent;
+import com.whodundid.artifactRun.ecs.EntityComponentType;
 
-public class SizeComponent implements IEntityComponent {
+public class SizeComponent extends AbstractEntityComponent {
+    
+    //===============
+    // Static Fields
+    //===============
+    
+    public static final EntityComponentType COMPONENT_TYPE = EntityComponentType.SIZE;
     
     //========
     // Fields
@@ -15,13 +22,17 @@ public class SizeComponent implements IEntityComponent {
     // Constructors
     //==============
     
-    public SizeComponent() {}
+    public SizeComponent() { this(0f, 0f); }
     public SizeComponent(float width, float height) {
+        super(COMPONENT_TYPE);
+        
         this.width = width;
         this.height = height;
     }
     
     public SizeComponent(SizeComponent comp) {
+        super(COMPONENT_TYPE);
+        
         this.width = comp.width;
         this.height = comp.height;
     }
@@ -31,12 +42,7 @@ public class SizeComponent implements IEntityComponent {
     //===========
     
     @Override
-    public String getTypeName() {
-        return "size";
-    }
-    
-    @Override
-    public IEntityComponent copy() {
+    public SizeComponent copy() {
         return new SizeComponent(this);
     }
     

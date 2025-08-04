@@ -3,6 +3,8 @@ package com.whodundid.artifactRun.ecs.components;
 import static org.junit.jupiter.api.Assertions.*;
 import org.junit.jupiter.api.Test;
 
+import com.whodundid.artifactRun.ecs.EntityComponentType;
+
 public class TeamComponentTest {
 
     @Test
@@ -35,8 +37,8 @@ public class TeamComponentTest {
     }
 
     @Test
-    void getTypeName_returnsCorrectString() {
-        assertEquals("team", new TeamComponent().getTypeName());
+    void getTypeName_returnsCorrectComponetType() {
+        assertEquals(EntityComponentType.TEAM, new TeamComponent().getComponentType());
     }
     
 }

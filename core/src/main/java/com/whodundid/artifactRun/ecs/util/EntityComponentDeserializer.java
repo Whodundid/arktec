@@ -7,17 +7,17 @@ import com.google.gson.JsonDeserializer;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
-import com.whodundid.artifactRun.ecs.IEntityComponent;
+import com.whodundid.artifactRun.ecs.AbstractEntityComponent;
 import com.whodundid.artifactRun.ecs.EntityComponentRegistry;
 
-public class EntityComponentDeserializer implements JsonDeserializer<IEntityComponent> {
+public class EntityComponentDeserializer implements JsonDeserializer<AbstractEntityComponent> {
     
     @Override
-    public IEntityComponent deserialize(JsonElement json, Type typeOfT, JsonDeserializationContext context) throws JsonParseException {
+    public AbstractEntityComponent deserialize(JsonElement json, Type typeOfT, JsonDeserializationContext context) throws JsonParseException {
         JsonObject obj = json.getAsJsonObject();
         String type = obj.get("type").getAsString();
 
-        Class<? extends IEntityComponent> clazz = EntityComponentRegistry.get(type);
+        Class<? extends AbstractEntityComponent> clazz = EntityComponentRegistry.get(type);
         if (clazz == null) {
             throw new JsonParseException("Unknown component type: " + type);
         }

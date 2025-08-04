@@ -3,6 +3,8 @@ package com.whodundid.artifactRun.ecs.components;
 import static org.junit.jupiter.api.Assertions.*;
 import org.junit.jupiter.api.Test;
 
+import com.whodundid.artifactRun.ecs.EntityComponentType;
+
 public class HealthComponentTest {
 
     @Test
@@ -14,7 +16,7 @@ public class HealthComponentTest {
 
     @Test
     void parameterizedConstructor_setsFieldsCorrectly() {
-        var c = new HealthComponent(50, 100);
+        var c = new HealthComponent(100, 50);
         assertEquals(50, c.health);
         assertEquals(100, c.maxHealth);
     }
@@ -31,7 +33,7 @@ public class HealthComponentTest {
 
     @Test
     void copyMethod_returnsNewInstanceWithSameValues() {
-        var c = new HealthComponent(10, 20);
+        var c = new HealthComponent(20, 10);
         var copy = c.copy();
 
         assertTrue(copy instanceof HealthComponent);
@@ -43,8 +45,8 @@ public class HealthComponentTest {
     }
 
     @Test
-    void getTypeName_returnsCorrectString() {
-        assertEquals("health", new HealthComponent().getTypeName());
+    void getTypeName_returnsCorrectComponetType() {
+        assertEquals(EntityComponentType.HEALTH, new HealthComponent().getComponentType());
     }
     
 }

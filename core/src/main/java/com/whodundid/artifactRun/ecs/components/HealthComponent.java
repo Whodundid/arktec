@@ -1,8 +1,15 @@
 package com.whodundid.artifactRun.ecs.components;
 
-import com.whodundid.artifactRun.ecs.IEntityComponent;
+import com.whodundid.artifactRun.ecs.AbstractEntityComponent;
+import com.whodundid.artifactRun.ecs.EntityComponentType;
 
-public class HealthComponent implements IEntityComponent {
+public class HealthComponent extends AbstractEntityComponent {
+    
+    //===============
+    // Static Fields
+    //===============
+    
+    public static final EntityComponentType COMPONENT_TYPE = EntityComponentType.HEALTH;
     
     //========
     // Fields
@@ -15,13 +22,17 @@ public class HealthComponent implements IEntityComponent {
     // Constructors
     //==============
     
-    public HealthComponent() {}
+    public HealthComponent() { this (0, 0); }
     public HealthComponent(int maxHealth, int health) {
+        super(COMPONENT_TYPE);
+        
         this.maxHealth = maxHealth;
         this.health = health;
     }
     
     public HealthComponent(HealthComponent comp) {
+        super(COMPONENT_TYPE);
+        
         this.maxHealth = comp.maxHealth;
         this.health = comp.health;
     }
@@ -31,12 +42,7 @@ public class HealthComponent implements IEntityComponent {
     //===========
     
     @Override
-    public String getTypeName() {
-        return "health";
-    }
-    
-    @Override
-    public IEntityComponent copy() {
+    public HealthComponent copy() {
         return new HealthComponent(this);
     }
     
