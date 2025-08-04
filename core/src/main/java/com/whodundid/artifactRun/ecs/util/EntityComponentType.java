@@ -6,7 +6,7 @@ public enum EntityComponentType {
     INPUT,
     LIFETIME,
     POSITION,
-    RENDER,
+    RENDERER,
     SIZE,
     TEAM,
     VELOCITY;

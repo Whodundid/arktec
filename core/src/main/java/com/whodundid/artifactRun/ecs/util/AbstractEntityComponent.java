@@ -1,6 +1,4 @@
-package com.whodundid.artifactRun.ecs;
-
-import com.whodundid.artifactRun.ecs.util.EntityComponentType;
+package com.whodundid.artifactRun.ecs.util;
 
 public abstract class AbstractEntityComponent {
     
@@ -24,7 +22,7 @@ public abstract class AbstractEntityComponent {
     
     @Override
     public String toString() {
-        return getComponentType().name().toLowerCase();
+        return super.toString() + ":" + getComponentType().name().toLowerCase();
     }
     
     //===========

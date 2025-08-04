@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import com.whodundid.artifactRun.ecs.util.AbstractEntityComponent;
 import com.whodundid.artifactRun.ecs.util.JsonUtil;
 
 import eutil.datatypes.util.EList;

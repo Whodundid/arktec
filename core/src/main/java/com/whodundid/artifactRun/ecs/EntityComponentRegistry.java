@@ -8,10 +8,11 @@ import com.whodundid.artifactRun.ecs.components.HealthComponent;
 import com.whodundid.artifactRun.ecs.components.InputComponent;
 import com.whodundid.artifactRun.ecs.components.LifetimeComponent;
 import com.whodundid.artifactRun.ecs.components.PositionComponent;
-import com.whodundid.artifactRun.ecs.components.RenderComponent;
+import com.whodundid.artifactRun.ecs.components.EntityRendererComponent;
 import com.whodundid.artifactRun.ecs.components.SizeComponent;
 import com.whodundid.artifactRun.ecs.components.TeamComponent;
 import com.whodundid.artifactRun.ecs.components.VelocityComponent;
+import com.whodundid.artifactRun.ecs.util.AbstractEntityComponent;
 import com.whodundid.artifactRun.ecs.util.EntityComponentType;
 
 public class EntityComponentRegistry {
@@ -19,15 +20,15 @@ public class EntityComponentRegistry {
     private static final Map<String, Class<? extends AbstractEntityComponent>> typeMap = new HashMap<>();
 
     static {
-        register(CollisionComponent.COMPONENT_TYPE , CollisionComponent.class);
-        register(   HealthComponent.COMPONENT_TYPE ,    HealthComponent.class);
-        register(    InputComponent.COMPONENT_TYPE ,     InputComponent.class);
-        register( LifetimeComponent.COMPONENT_TYPE ,  LifetimeComponent.class);
-        register( PositionComponent.COMPONENT_TYPE ,  PositionComponent.class);
-        register(   RenderComponent.COMPONENT_TYPE ,    RenderComponent.class);
-        register(     SizeComponent.COMPONENT_TYPE ,      SizeComponent.class);
-        register(     TeamComponent.COMPONENT_TYPE ,      TeamComponent.class);
-        register( VelocityComponent.COMPONENT_TYPE ,  VelocityComponent.class);
+        register(CollisionComponent.COMPONENT_TYPE, CollisionComponent.class);
+        register(HealthComponent.COMPONENT_TYPE, HealthComponent.class);
+        register(InputComponent.COMPONENT_TYPE, InputComponent.class);
+        register(LifetimeComponent.COMPONENT_TYPE, LifetimeComponent.class);
+        register(PositionComponent.COMPONENT_TYPE, PositionComponent.class);
+        register(EntityRendererComponent.COMPONENT_TYPE, EntityRendererComponent.class);
+        register(SizeComponent.COMPONENT_TYPE, SizeComponent.class);
+        register(TeamComponent.COMPONENT_TYPE, TeamComponent.class);
+        register(VelocityComponent.COMPONENT_TYPE, VelocityComponent.class);
     }
     
     public static void register(EntityComponentType type, Class<? extends AbstractEntityComponent> clazz) {

@@ -9,7 +9,7 @@ import com.whodundid.artifactRun.ecs.components.CollisionComponent;
 import com.whodundid.artifactRun.ecs.components.HealthComponent;
 import com.whodundid.artifactRun.ecs.components.InputComponent;
 import com.whodundid.artifactRun.ecs.components.PositionComponent;
-import com.whodundid.artifactRun.ecs.components.RenderComponent;
+import com.whodundid.artifactRun.ecs.components.EntityRendererComponent;
 import com.whodundid.artifactRun.ecs.components.SizeComponent;
 import com.whodundid.artifactRun.ecs.components.TeamComponent;
 import com.whodundid.artifactRun.ecs.components.VelocityComponent;
@@ -125,9 +125,9 @@ public class EntityTest {
     @Test
     public void testHasComponentWorks() {
         Entity entity = new Entity();
-        assertFalse(entity.hasComponent(RenderComponent.class));
-        entity.addComponent(new RenderComponent((TextureRegion) null));
-        assertTrue(entity.hasComponent(RenderComponent.class));
+        assertFalse(entity.hasComponent(EntityRendererComponent.class));
+        entity.addComponent(new EntityRendererComponent((TextureRegion) null));
+        assertTrue(entity.hasComponent(EntityRendererComponent.class));
     }
 
     @Test
