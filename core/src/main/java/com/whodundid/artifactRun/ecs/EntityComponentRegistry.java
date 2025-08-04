@@ -12,6 +12,7 @@ import com.whodundid.artifactRun.ecs.components.RenderComponent;
 import com.whodundid.artifactRun.ecs.components.SizeComponent;
 import com.whodundid.artifactRun.ecs.components.TeamComponent;
 import com.whodundid.artifactRun.ecs.components.VelocityComponent;
+import com.whodundid.artifactRun.ecs.util.EntityComponentType;
 
 public class EntityComponentRegistry {
     

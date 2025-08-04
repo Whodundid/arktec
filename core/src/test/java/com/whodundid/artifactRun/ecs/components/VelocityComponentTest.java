@@ -3,7 +3,7 @@ package com.whodundid.artifactRun.ecs.components;
 import static org.junit.jupiter.api.Assertions.*;
 import org.junit.jupiter.api.Test;
 
-import com.whodundid.artifactRun.ecs.EntityComponentType;
+import com.whodundid.artifactRun.ecs.util.EntityComponentType;
 
 public class VelocityComponentTest {
 

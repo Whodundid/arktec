@@ -1,5 +1,7 @@
 package com.whodundid.artifactRun.ecs;
 
+import com.whodundid.artifactRun.ecs.util.EntityComponentType;
+
 public abstract class AbstractEntityComponent {
     
     //========

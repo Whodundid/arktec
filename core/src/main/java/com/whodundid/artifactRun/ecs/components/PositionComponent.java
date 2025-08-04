@@ -1,7 +1,7 @@
 package com.whodundid.artifactRun.ecs.components;
 
 import com.whodundid.artifactRun.ecs.AbstractEntityComponent;
-import com.whodundid.artifactRun.ecs.EntityComponentType;
+import com.whodundid.artifactRun.ecs.util.EntityComponentType;
 
 public class PositionComponent extends AbstractEntityComponent {
     

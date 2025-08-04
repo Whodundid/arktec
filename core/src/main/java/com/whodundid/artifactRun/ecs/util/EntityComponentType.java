@@ -1,4 +1,4 @@
-package com.whodundid.artifactRun.ecs;
+package com.whodundid.artifactRun.ecs.util;
 
 public enum EntityComponentType {
     COLLISION,
