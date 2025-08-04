@@ -24,6 +24,14 @@ allprojects {
     maven { url 'https://s01.oss.sonatype.org/content/repositories/releases/' }
     maven { url 'https://oss.sonatype.org/content/repositories/snapshots/' }
     maven { url 'https://s01.oss.sonatype.org/content/repositories/snapshots/' }
+    maven {
+        url 'http://192.168.0.10:8081/repository/storm-repo-releases/'
+        allowInsecureProtocol = true
+    }
+    maven {
+        url 'http://192.168.0.10:8081/repository/storm-repo-snapshots/'
+        allowInsecureProtocol = true
+    }
     mavenLocal()
   }
 
@@ -68,7 +76,7 @@ configure(subprojects) {
 
 subprojects {
   version = "$projectVersion"
-  ext.appName = 'ArkTec'
+  ext.appName = 'ArtifactRun'
 }
 
-eclipse.project.name = 'ArkTec'
+eclipse.project.name = 'ArtifactRun'
