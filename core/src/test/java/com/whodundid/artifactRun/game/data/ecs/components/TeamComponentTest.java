@@ -10,36 +10,36 @@ public class TeamComponentTest {
 
     @Test
     void defaultConstructor_setsTeamToNeutral() {
-        var c = new TeamComponent();
-        assertEquals(TeamComponent.Team.NEUTRAL, c.team);
+        var c = new FactionComponent();
+        assertEquals(FactionComponent.FACTION.NEUTRAL, c.faction);
     }
 
     @Test
     void parameterizedConstructor_setsTeamCorrectly() {
-        var c = new TeamComponent(TeamComponent.Team.PLAYER);
-        assertEquals(TeamComponent.Team.PLAYER, c.team);
+        var c = new FactionComponent(FactionComponent.FACTION.PLAYER);
+        assertEquals(FactionComponent.FACTION.PLAYER, c.faction);
     }
 
     @Test
     void copyConstructor_copiesValue() {
-        var original = new TeamComponent(TeamComponent.Team.ENEMY);
-        var copy = new TeamComponent(original);
+        var original = new FactionComponent(FactionComponent.FACTION.ENEMY);
+        var copy = new FactionComponent(original);
         assertNotSame(original, copy);
-        assertEquals(original.team, copy.team);
+        assertEquals(original.faction, copy.faction);
     }
 
     @Test
     void copyMethod_returnsNewInstance() {
-        var c = new TeamComponent(TeamComponent.Team.PLAYER);
+        var c = new FactionComponent(FactionComponent.FACTION.PLAYER);
         var copy = c.copy();
-        assertTrue(copy instanceof TeamComponent);
+        assertTrue(copy instanceof FactionComponent);
         assertNotSame(c, copy);
-        assertEquals(TeamComponent.Team.PLAYER, ((TeamComponent) copy).team);
+        assertEquals(FactionComponent.FACTION.PLAYER, ((FactionComponent) copy).faction);
     }
 
     @Test
     void getTypeName_returnsCorrectComponetType() {
-        assertEquals(EntityComponentType.TEAM, new TeamComponent().getComponentType());
+        assertEquals(EntityComponentType.FACTION, new FactionComponent().getComponentType());
     }
     
 }

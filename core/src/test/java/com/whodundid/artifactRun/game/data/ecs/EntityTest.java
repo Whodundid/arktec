@@ -12,8 +12,8 @@ import com.whodundid.artifactRun.game.data.ecs.components.HealthComponent;
 import com.whodundid.artifactRun.game.data.ecs.components.InputComponent;
 import com.whodundid.artifactRun.game.data.ecs.components.PositionComponent;
 import com.whodundid.artifactRun.game.data.ecs.components.SizeComponent;
-import com.whodundid.artifactRun.game.data.ecs.components.TeamComponent;
-import com.whodundid.artifactRun.game.data.ecs.components.TeamComponent.Team;
+import com.whodundid.artifactRun.game.data.ecs.components.FactionComponent;
+import com.whodundid.artifactRun.game.data.ecs.components.FactionComponent.FACTION;
 import com.whodundid.artifactRun.game.data.ecs.components.VelocityComponent;
 import com.whodundid.artifactRun.game.data.ecs.util.EntityAnimationState;
 
@@ -121,7 +121,7 @@ public class EntityTest {
     void testEntityCopyDeepCopiesComponents() {
         Entity original = new Entity();
         original.addComponent(new SizeComponent(16, 16));
-        original.addComponent(new TeamComponent(Team.PLAYER));
+        original.addComponent(new FactionComponent(FACTION.PLAYER));
 
         Entity copy = new Entity(original);
 

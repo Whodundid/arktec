@@ -3,19 +3,19 @@ package com.whodundid.artifactRun.game.data.ecs.components;
 import com.whodundid.artifactRun.game.data.ecs.util.AbstractEntityComponent;
 import com.whodundid.artifactRun.game.data.ecs.util.EntityComponentType;
 
-public class TeamComponent extends AbstractEntityComponent {
+public class FactionComponent extends AbstractEntityComponent {
     
     //===============
     // Static Fields
     //===============
     
-    public static final EntityComponentType COMPONENT_TYPE = EntityComponentType.TEAM;
+    public static final EntityComponentType COMPONENT_TYPE = EntityComponentType.FACTION;
     
     //================
     // Static Classes
     //================
     
-    public static enum Team {
+    public static enum FACTION {
         PLAYER,
         ENEMY,
         NEUTRAL
@@ -25,23 +25,23 @@ public class TeamComponent extends AbstractEntityComponent {
     // Fields
     //========
     
-    public Team team;
+    public FACTION faction;
     
     //==============
     // Constructors
     //==============
     
-    public TeamComponent() { this(Team.NEUTRAL); }
-    public TeamComponent(Team team) {
+    public FactionComponent() { this(FACTION.NEUTRAL); }
+    public FactionComponent(FACTION team) {
         super(COMPONENT_TYPE);
         
-        this.team = team;
+        this.faction = team;
     }
     
-    public TeamComponent(TeamComponent comp) {
+    public FactionComponent(FactionComponent comp) {
         super(COMPONENT_TYPE);
         
-        this.team = comp.team;
+        this.faction = comp.faction;
     }
     
     //===========
@@ -49,8 +49,8 @@ public class TeamComponent extends AbstractEntityComponent {
     //===========
     
     @Override
-    public TeamComponent copy() {
-        return new TeamComponent(this);
+    public FactionComponent copy() {
+        return new FactionComponent(this);
     }
     
 }

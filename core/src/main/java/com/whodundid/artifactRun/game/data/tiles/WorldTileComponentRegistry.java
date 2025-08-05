@@ -18,7 +18,7 @@ public class WorldTileComponentRegistry {
     // Static Fields
     //===============
     
-    private static final ConcurrentMap<String, Class<? extends AbstractWorldTileComponent>> typeMap = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<String, Class<? extends AbstractWorldTileComponent>> TYPE_MAP = new ConcurrentHashMap<>();
 
     //=======================
     // Static Initialization
@@ -37,11 +37,11 @@ public class WorldTileComponentRegistry {
     }
     
     public static void register(String type, Class<? extends AbstractWorldTileComponent> clazz) {
-        typeMap.put(type, clazz);
+        TYPE_MAP.put(type, clazz);
     }
 
     public static Class<? extends AbstractWorldTileComponent> get(String type) {
-        return typeMap.get(type);
+        return TYPE_MAP.get(type);
     }
     
     //=======================
@@ -58,7 +58,7 @@ public class WorldTileComponentRegistry {
     }
     
     public static void resetRegistry() {
-        typeMap.clear();
+        TYPE_MAP.clear();
         registerDefaultComponents();
     }
     

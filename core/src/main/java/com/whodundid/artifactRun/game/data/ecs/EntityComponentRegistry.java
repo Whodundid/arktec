@@ -13,7 +13,7 @@ public class EntityComponentRegistry {
     // Static Fields
     //===============
     
-    private static final ConcurrentMap<String, Class<? extends AbstractEntityComponent>> typeMap = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<String, Class<? extends AbstractEntityComponent>> TYPE_MAP = new ConcurrentHashMap<>();
     
     //=======================
     // Static Initialization
@@ -32,11 +32,11 @@ public class EntityComponentRegistry {
     }
     
     public static void register(String type, Class<? extends AbstractEntityComponent> clazz) {
-        typeMap.put(type, clazz);
+        TYPE_MAP.put(type, clazz);
     }
 
     public static Class<? extends AbstractEntityComponent> get(String type) {
-        return typeMap.get(type);
+        return TYPE_MAP.get(type);
     }
     
     //=======================
@@ -48,15 +48,16 @@ public class EntityComponentRegistry {
         register(HealthComponent.COMPONENT_TYPE, HealthComponent.class);
         register(InputComponent.COMPONENT_TYPE, InputComponent.class);
         register(LifetimeComponent.COMPONENT_TYPE, LifetimeComponent.class);
+        register(EntityNameComponent.COMPONENT_TYPE, EntityNameComponent.class);
         register(PositionComponent.COMPONENT_TYPE, PositionComponent.class);
         register(EntityRendererComponent.COMPONENT_TYPE, EntityRendererComponent.class);
         register(SizeComponent.COMPONENT_TYPE, SizeComponent.class);
-        register(TeamComponent.COMPONENT_TYPE, TeamComponent.class);
+        register(FactionComponent.COMPONENT_TYPE, FactionComponent.class);
         register(VelocityComponent.COMPONENT_TYPE, VelocityComponent.class);
     }
     
     public static void resetRegistry() {
-        typeMap.clear();
+        TYPE_MAP.clear();
         registerDefaultComponents();
     }
     

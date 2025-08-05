@@ -1,6 +1,7 @@
 package com.whodundid.artifactRun.game.data.ecs.util;
 
 public enum EntityComponentType {
+    NAME,
     COLLISION,
     HEALTH,
     INPUT,
@@ -8,6 +9,6 @@ public enum EntityComponentType {
     POSITION,
     RENDERER,
     SIZE,
-    TEAM,
+    FACTION,
     VELOCITY;
 }
