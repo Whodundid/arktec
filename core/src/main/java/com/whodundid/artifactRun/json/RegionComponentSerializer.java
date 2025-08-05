@@ -7,12 +7,12 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSerializationContext;
 import com.google.gson.JsonSerializer;
-import com.whodundid.artifactRun.game.data.tile.AbstractWorldTileComponent;
+import com.whodundid.artifactRun.game.data.region.AbstractRegionComponent;
 
-public class WorldTileComponentSerializer implements JsonSerializer<AbstractWorldTileComponent> {
+public class RegionComponentSerializer implements JsonSerializer<AbstractRegionComponent> {
     
     @Override
-    public JsonElement serialize(AbstractWorldTileComponent src, Type typeOfSrc, JsonSerializationContext context) {
+    public JsonElement serialize(AbstractRegionComponent src, Type typeOfSrc, JsonSerializationContext context) {
         JsonObject original = context.serialize(src).getAsJsonObject();
         JsonObject result = new JsonObject();
         

@@ -6,8 +6,8 @@ import java.util.regex.Pattern;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonSyntaxException;
-import com.whodundid.artifactRun.game.data.ecs.util.AbstractEntityComponent;
-import com.whodundid.artifactRun.game.data.tiles.util.AbstractWorldTileComponent;
+import com.whodundid.artifactRun.game.data.entity.AbstractEntityComponent;
+import com.whodundid.artifactRun.game.data.tile.AbstractWorldTileComponent;
 
 import eutil.datatypes.util.EList;
 

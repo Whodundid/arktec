@@ -7,9 +7,9 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 
-import com.whodundid.artifactRun.game.data.ecs.Entity;
+import com.whodundid.artifactRun.game.data.entity.Entity;
 import com.whodundid.artifactRun.game.data.scripts.GameScript;
-import com.whodundid.artifactRun.game.data.tiles.WorldTile;
+import com.whodundid.artifactRun.game.data.tile.WorldTile;
 import com.whodundid.artifactRun.game.data.world.GameWorld;
 
 import eutil.datatypes.boxes.BoxList;

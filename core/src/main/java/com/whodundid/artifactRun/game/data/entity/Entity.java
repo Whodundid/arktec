@@ -1,19 +1,19 @@
-package com.whodundid.artifactRun.game.data.region;
+package com.whodundid.artifactRun.game.data.entity;
 
 import com.whodundid.artifactRun.game.data.component.AbstractComponentBasedObject;
 import com.whodundid.artifactRun.json.JsonUtil;
 
-public class Region extends AbstractComponentBasedObject<AbstractRegionComponent> {
+public class Entity extends AbstractComponentBasedObject<AbstractEntityComponent> {   
     
     //==============
     // Constructors
     //==============
     
-    public Region() {
+    public Entity() {
         super();
     }
     
-    public Region(Region other) {
+    public Entity(Entity other) {
         super(other);
     }
     
@@ -23,15 +23,15 @@ public class Region extends AbstractComponentBasedObject<AbstractRegionComponent
     
     @Override
     public String toString() {
-        return "Region{id=" + objectId + ", components=" + componentTypeMap.keySet() + "}";
+        return "Entity{id=" + objectId + ", components=" + componentTypeMap.keySet() + "}";
     }
     
     //=======================
     // Static Helper Methods
     //=======================
     
-    public static Region fromJson(String jsonString) {
-        Region entity = JsonUtil.fromJson(jsonString, Region.class);
+    public static Entity fromJson(String jsonString) {
+        Entity entity = JsonUtil.fromJson(jsonString, Entity.class);
         entity.rebuildComponentMap();
         return entity;
     }

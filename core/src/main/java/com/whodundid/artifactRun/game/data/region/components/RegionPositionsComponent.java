@@ -2,8 +2,8 @@ package com.whodundid.artifactRun.game.data.region.components;
 
 import java.awt.Point;
 
-import com.whodundid.artifactRun.game.data.region.util.AbstractRegionComponent;
-import com.whodundid.artifactRun.game.data.region.util.RegionComponentType;
+import com.whodundid.artifactRun.game.data.region.AbstractRegionComponent;
+import com.whodundid.artifactRun.game.data.region.RegionComponentType;
 
 import eutil.datatypes.util.EList;
 
