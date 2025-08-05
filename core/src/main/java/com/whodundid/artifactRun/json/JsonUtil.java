@@ -6,11 +6,7 @@ import java.util.regex.Pattern;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonSyntaxException;
-import com.whodundid.artifactRun.game.data.ecs.json.EntityComponentDeserializer;
-import com.whodundid.artifactRun.game.data.ecs.json.EntityComponentSerializer;
 import com.whodundid.artifactRun.game.data.ecs.util.AbstractEntityComponent;
-import com.whodundid.artifactRun.game.data.tiles.json.WorldTileComponentDeserializer;
-import com.whodundid.artifactRun.game.data.tiles.json.WorldTileComponentSerializer;
 import com.whodundid.artifactRun.game.data.tiles.util.AbstractWorldTileComponent;
 
 import eutil.datatypes.util.EList;

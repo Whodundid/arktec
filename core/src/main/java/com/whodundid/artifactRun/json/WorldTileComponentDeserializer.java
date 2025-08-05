@@ -1,4 +1,4 @@
-package com.whodundid.artifactRun.game.data.tiles.json;
+package com.whodundid.artifactRun.json;
 
 import java.lang.reflect.Type;
 

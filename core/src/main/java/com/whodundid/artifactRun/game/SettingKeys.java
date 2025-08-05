@@ -1,4 +1,4 @@
-package com.whodundid.artifactRun.game.save;
+package com.whodundid.artifactRun.game;
 
 public class SettingKeys {
     
