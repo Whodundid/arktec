@@ -1,6 +1,6 @@
 package com.whodundid.artifactRun.game.data.region;
 
-import com.whodundid.artifactRun.game.data.component.AbstractComponent;
+import com.whodundid.artifactRun.game.component.AbstractComponent;
 
 public abstract class AbstractRegionComponent extends AbstractComponent<RegionComponentType> {
     

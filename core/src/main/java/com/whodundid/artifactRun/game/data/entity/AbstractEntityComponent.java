@@ -1,6 +1,6 @@
 package com.whodundid.artifactRun.game.data.entity;
 
-import com.whodundid.artifactRun.game.data.component.AbstractComponent;
+import com.whodundid.artifactRun.game.component.AbstractComponent;
 
 public abstract class AbstractEntityComponent extends AbstractComponent<EntityComponentType> {
     

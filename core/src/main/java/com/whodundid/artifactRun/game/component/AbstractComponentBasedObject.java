@@ -1,4 +1,4 @@
-package com.whodundid.artifactRun.game.data.component;
+package com.whodundid.artifactRun.game.component;
 
 import java.util.Collections;
 import java.util.HashMap;

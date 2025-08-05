@@ -1,6 +1,6 @@
 package com.whodundid.artifactRun.game.data.tile;
 
-import com.whodundid.artifactRun.game.data.component.AbstractComponentBasedObject;
+import com.whodundid.artifactRun.game.component.AbstractComponentBasedObject;
 import com.whodundid.artifactRun.json.JsonUtil;
 
 public class WorldTile extends AbstractComponentBasedObject<AbstractWorldTileComponent> {

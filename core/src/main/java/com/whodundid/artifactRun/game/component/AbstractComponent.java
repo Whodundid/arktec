@@ -1,4 +1,4 @@
-package com.whodundid.artifactRun.game.data.component;
+package com.whodundid.artifactRun.game.component;
 
 public abstract class AbstractComponent<T extends Enum> {
     

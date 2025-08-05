@@ -1,4 +1,4 @@
-package com.whodundid.artifactRun.game.data.component;
+package com.whodundid.artifactRun.game.component;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
