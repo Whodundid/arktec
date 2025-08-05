@@ -1,4 +1,4 @@
-package com.whodundid.artifactRun.game;
+package com.whodundid.artifactRun.game.settings;
 
 public enum GameDifficulty {
     EASY,

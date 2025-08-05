@@ -2,8 +2,8 @@ package com.whodundid.artifactRun.game.save;
 
 import java.io.IOException;
 
-import com.whodundid.artifactRun.game.GameDifficulty;
-import com.whodundid.artifactRun.game.SettingKeys;
+import com.whodundid.artifactRun.game.settings.GameDifficulty;
+import com.whodundid.artifactRun.game.settings.SettingKeys;
 
 public class LoadedGameInstance {
     

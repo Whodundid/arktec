@@ -5,7 +5,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import com.whodundid.artifactRun.game.GameDifficulty;
+import com.whodundid.artifactRun.game.settings.GameDifficulty;
 import com.whodundid.artifactRun.json.JsonUtil;
 
 public class GameSaveSettings {

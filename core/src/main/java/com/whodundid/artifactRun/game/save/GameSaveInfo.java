@@ -9,7 +9,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import com.whodundid.artifactRun.game.SettingKeys;
+import com.whodundid.artifactRun.game.settings.SettingKeys;
 import com.whodundid.artifactRun.json.JsonUtil;
 
 import eutil.EUtil;

@@ -8,7 +8,7 @@ import java.nio.file.Files;
 
 import org.junit.jupiter.api.Test;
 
-import com.whodundid.artifactRun.game.GameDifficulty;
+import com.whodundid.artifactRun.game.settings.GameDifficulty;
 
 class GameSaveSettingsTest {
     
