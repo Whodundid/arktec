@@ -3,8 +3,8 @@ package com.whodundid.artifactRun.project;
 import java.io.File;
 import java.io.IOException;
 
-import com.whodundid.artifactRun.game.save.ArtifactRunGameInstance;
-import com.whodundid.artifactRun.game.save.GameSaveDirectory;
+import com.whodundid.artifactRun.save.ArtifactRunGameInstance;
+import com.whodundid.artifactRun.save.GameSaveDirectory;
 import com.whodundid.artifactRun.window.ArtifactRunEditorWindow;
 
 public class EditorProjectHelper {

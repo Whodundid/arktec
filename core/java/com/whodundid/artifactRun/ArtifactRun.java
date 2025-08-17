@@ -2,7 +2,7 @@ package com.whodundid.artifactRun;
 
 import com.badlogic.gdx.Game;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.whodundid.artifactRun.game.data.screen.MainMenuScreen;
+import com.whodundid.artifactRun.game.screen.MainMenuScreen;
 
 public class ArtifactRun extends Game {
     

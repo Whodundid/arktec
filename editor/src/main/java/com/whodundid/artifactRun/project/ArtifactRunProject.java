@@ -2,7 +2,7 @@ package com.whodundid.artifactRun.project;
 
 import java.io.File;
 
-import com.whodundid.artifactRun.game.save.ArtifactRunGameInstance;
+import com.whodundid.artifactRun.save.ArtifactRunGameInstance;
 
 public class ArtifactRunProject {
     
