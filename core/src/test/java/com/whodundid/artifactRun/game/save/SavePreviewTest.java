@@ -55,7 +55,7 @@ class SavePreviewTest {
     
     // Dummy stub classes to fake GameLevel behavior
     
-    static class DummyGameLevel extends LoadedGameInstance {
+    static class DummyGameLevel extends ArtifactRunGameInstance {
         GameSaveDirectory dir;
         
         DummyGameLevel(boolean hasImage) throws IOException {
