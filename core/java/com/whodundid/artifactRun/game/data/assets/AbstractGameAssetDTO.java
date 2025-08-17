@@ -1,6 +1,8 @@
 package com.whodundid.artifactRun.game.data.assets;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.assets.AssetDescriptor;
+import com.badlogic.gdx.files.FileHandle;
 import com.whodundid.artifactRun.json.JsonUtil;
 
 public abstract class AbstractGameAssetDTO<T> {
@@ -24,6 +26,7 @@ public abstract class AbstractGameAssetDTO<T> {
     //===========
     
     public abstract AssetDescriptor<T> toDescriptor();
+    public abstract String assetKey();
     
     //=========
     // Methods
@@ -39,6 +42,23 @@ public abstract class AbstractGameAssetDTO<T> {
     
     public AssetType getAssetType() {
         return type;
+    }
+    
+    //=======================
+    // Static Helper Methods
+    //=======================
+    
+    protected static FileHandle fh(AssetLocation location, String filePath) {
+        return switch (location) {
+        case INTERNAL -> Gdx.files.internal(filePath);
+        case LOCAL -> Gdx.files.local(filePath);
+        case EXTERNAL -> Gdx.files.external(filePath);
+        case ABSOLUTE -> Gdx.files.absolute(filePath);
+        };
+    }
+    
+    protected static String fhs(AssetLocation location, String filePath) {
+        return fh(location, filePath).path();
     }
     
 }

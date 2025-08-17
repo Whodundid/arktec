@@ -62,7 +62,7 @@ public abstract class AbstractAssetRegistry<A, T extends AbstractGameAssetDTO<A>
             throw new IllegalStateException("Asset provides no descriptor: " + asset);
         }
 
-        final String key = descriptor.fileName;
+        final String key = asset.assetKey();
         if (key == null || key.isEmpty()) {
             throw new IllegalStateException("Asset key is null/empty for: " + asset);
         }

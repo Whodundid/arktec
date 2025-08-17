@@ -60,6 +60,7 @@ public class TextureAssetDTO extends AbstractGameAssetDTO<Texture> {
     // Overrides
     //===========
     
+    @Override
     public AssetDescriptor<Texture> toDescriptor() {
         // build the FileHandle based on location
         final FileHandle fh = switch (location) {
@@ -79,6 +80,16 @@ public class TextureAssetDTO extends AbstractGameAssetDTO<Texture> {
 
         // Use the AssetDescriptor ctor that accepts a FileHandle
         return new AssetDescriptor<>(fh, Texture.class, p);
+    }
+    
+    @Override
+    public String assetKey() {
+        return switch (location) {
+        case INTERNAL -> Gdx.files.internal(filePath).path();
+        case LOCAL    -> Gdx.files.local(filePath).path();
+        case EXTERNAL -> Gdx.files.external(filePath).path();
+        case ABSOLUTE -> Gdx.files.absolute(filePath).path();
+        };
     }
     
     //=======================

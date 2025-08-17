@@ -2,13 +2,13 @@ package com.whodundid.artifactRun.game.data.assets.types;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.assets.AssetDescriptor;
-import com.badlogic.gdx.audio.Sound;
+import com.badlogic.gdx.audio.Music;
 import com.badlogic.gdx.files.FileHandle;
 import com.whodundid.artifactRun.game.data.assets.AbstractGameAssetDTO;
 import com.whodundid.artifactRun.game.data.assets.AssetLocation;
 import com.whodundid.artifactRun.game.data.assets.AssetType;
 
-public class SoundAssetDTO extends AbstractGameAssetDTO<Sound> {
+public class MusicAssetDTO extends AbstractGameAssetDTO<Music> {
     
     //========
     // Fields
@@ -21,7 +21,7 @@ public class SoundAssetDTO extends AbstractGameAssetDTO<Sound> {
     // Constructors
     //==============
     
-    public SoundAssetDTO(String filePath, AssetLocation location) {
+    public MusicAssetDTO(String filePath, AssetLocation location) {
         super(AssetType.SOUND);
         
         this.filePath = filePath;
@@ -33,14 +33,14 @@ public class SoundAssetDTO extends AbstractGameAssetDTO<Sound> {
     //===========
     
     @Override
-    public AssetDescriptor<Sound> toDescriptor() {
+    public AssetDescriptor<Music> toDescriptor() {
         FileHandle fh = switch (location) {
             case INTERNAL -> Gdx.files.internal(filePath);
             case LOCAL    -> Gdx.files.local(filePath);
             case EXTERNAL -> Gdx.files.external(filePath);
             case ABSOLUTE -> Gdx.files.absolute(filePath);
         };
-        return new AssetDescriptor<>(fh, Sound.class);
+        return new AssetDescriptor<>(fh, Music.class);
     }
 
     @Override
