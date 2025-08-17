@@ -20,8 +20,8 @@ public abstract class AbstractComponentBasedObject<T extends AbstractComponent<?
     protected final String objectId;
     
     protected final EList<T> componentList = EList.newList();
-    protected final transient Map<String, Class<?>> componentTypeMap = new HashMap<>();
-    protected final transient Map<Class<?>, T> componentMap = new HashMap<>();
+    protected final transient Map<String, Class<? extends T>> componentTypeMap = new HashMap<>();
+    protected final transient Map<Class<? extends T>, T> componentMap = new HashMap<>();
     
     //==============
     // Constructors
@@ -54,7 +54,7 @@ public abstract class AbstractComponentBasedObject<T extends AbstractComponent<?
     // Methods
     //=========
     
-    public boolean hasComponent(Class<?> componentClass) {
+    public boolean hasComponent(Class<? extends T> componentClass) {
         return componentMap.containsKey(componentClass);
     }
     
@@ -66,7 +66,15 @@ public abstract class AbstractComponentBasedObject<T extends AbstractComponent<?
         return componentTypeMap.containsKey(componentTypeName);
     }
     
-    public void removeComponent(Class<?> componentClass) {
+    public boolean hasAllComponents(Class<? extends T>... types) {
+        if (types == null) return true;
+        for (var t : types) {
+            if (!componentMap.containsKey(t)) return false;
+        }
+        return true;
+    }
+    
+    public void removeComponent(Class<? extends T> componentClass) {
         componentList.removeIf(c -> c.getClass().equals(componentClass));
         rebuildComponentMap();
     }
@@ -94,9 +102,11 @@ public abstract class AbstractComponentBasedObject<T extends AbstractComponent<?
         componentMap.clear();
         componentTypeMap.clear();
         
-        for (var c : componentList) {
-            componentMap.put(c.getClass(), c);
-            componentTypeMap.put(c.getComponentType().name(), c.getClass());
+        for (T c : componentList) {
+            @SuppressWarnings("unchecked")
+            Class<? extends T> k = (Class<? extends T>) c.getClass();
+            componentMap.put(k, c);
+            componentTypeMap.put(c.getComponentType().name(), k);
         }
     }
     
@@ -124,8 +134,12 @@ public abstract class AbstractComponentBasedObject<T extends AbstractComponent<?
         return (T) componentClass.cast(comp);
     }
     
-    public Map<Class<?>, T> getComponentMap() {
+    public Map<Class<? extends T>, T> getComponentMap() {
         return Collections.unmodifiableMap(componentMap);
+    }
+    
+    public Map<String, Class<? extends T>> getComponentTypeMap() {
+        return Collections.unmodifiableMap(componentTypeMap);
     }
     
     public EList<T> getComponentList() {

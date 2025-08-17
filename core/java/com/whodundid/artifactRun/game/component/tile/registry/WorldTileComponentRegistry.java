@@ -1,6 +1,7 @@
-package com.whodundid.artifactRun.game.component.tile;
+package com.whodundid.artifactRun.game.component.tile.registry;
 
 import com.whodundid.artifactRun.game.component.AbstractComponentRegistry;
+import com.whodundid.artifactRun.game.component.tile.AbstractWorldTileComponent;
 import com.whodundid.artifactRun.game.component.tile.components.DamageComponent;
 import com.whodundid.artifactRun.game.component.tile.components.DecorationComponent;
 import com.whodundid.artifactRun.game.component.tile.components.MovementSpeedModifierComponent;

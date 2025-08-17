@@ -1,4 +1,4 @@
-package com.whodundid.artifactRun.game.component.entity;
+package com.whodundid.artifactRun.game.component.entity.registry;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -7,6 +7,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.whodundid.artifactRun.game.component.entity.AbstractEntityComponent;
+import com.whodundid.artifactRun.game.component.entity.EntityComponentType;
 import com.whodundid.artifactRun.game.component.entity.components.CollisionComponent;
 import com.whodundid.artifactRun.game.component.entity.components.HealthComponent;
 import com.whodundid.artifactRun.game.component.entity.components.InputComponent;

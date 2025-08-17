@@ -8,7 +8,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.whodundid.artifactRun.game.component.entity.AbstractEntityComponent;
-import com.whodundid.artifactRun.game.component.entity.EntityComponentRegistry;
+import com.whodundid.artifactRun.game.component.entity.registry.EntityComponentRegistry;
 
 public class EntityComponentDeserializer implements JsonDeserializer<AbstractEntityComponent> {
     

@@ -1,6 +1,7 @@
-package com.whodundid.artifactRun.game.component.entity;
+package com.whodundid.artifactRun.game.component.entity.registry;
 
 import com.whodundid.artifactRun.game.component.AbstractComponentRegistry;
+import com.whodundid.artifactRun.game.component.entity.AbstractEntityComponent;
 import com.whodundid.artifactRun.game.component.entity.components.CollisionComponent;
 import com.whodundid.artifactRun.game.component.entity.components.EntityNameComponent;
 import com.whodundid.artifactRun.game.component.entity.components.EntityRendererComponent;

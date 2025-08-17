@@ -8,7 +8,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.whodundid.artifactRun.game.component.region.AbstractRegionComponent;
-import com.whodundid.artifactRun.game.component.region.RegionComponentRegistry;
+import com.whodundid.artifactRun.game.component.region.registry.RegionComponentRegistry;
 
 public class RegionComponentDeserializer implements JsonDeserializer<AbstractRegionComponent> {
     

@@ -1,4 +1,4 @@
-package com.whodundid.artifactRun.game.component.tile;
+package com.whodundid.artifactRun.game.component.tile.registry;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -7,6 +7,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.whodundid.artifactRun.game.component.tile.AbstractWorldTileComponent;
+import com.whodundid.artifactRun.game.component.tile.WorldTileComponentType;
 import com.whodundid.artifactRun.game.component.tile.components.DecorationComponent;
 import com.whodundid.artifactRun.game.component.tile.components.MovementSpeedModifierComponent;
 import com.whodundid.artifactRun.game.component.tile.components.TileTypeComponent;

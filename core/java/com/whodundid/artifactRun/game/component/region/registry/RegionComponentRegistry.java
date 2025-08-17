@@ -1,6 +1,7 @@
-package com.whodundid.artifactRun.game.component.region;
+package com.whodundid.artifactRun.game.component.region.registry;
 
 import com.whodundid.artifactRun.game.component.AbstractComponentRegistry;
+import com.whodundid.artifactRun.game.component.region.AbstractRegionComponent;
 import com.whodundid.artifactRun.game.component.region.components.EntityEnteredTriggerComponent;
 import com.whodundid.artifactRun.game.component.region.components.EntityExitedTriggerComponent;
 import com.whodundid.artifactRun.game.component.region.components.EnvironmentSoundsComponent;

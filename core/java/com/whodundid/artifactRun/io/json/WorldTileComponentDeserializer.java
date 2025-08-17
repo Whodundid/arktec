@@ -8,7 +8,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.whodundid.artifactRun.game.component.tile.AbstractWorldTileComponent;
-import com.whodundid.artifactRun.game.component.tile.WorldTileComponentRegistry;
+import com.whodundid.artifactRun.game.component.tile.registry.WorldTileComponentRegistry;
 
 public class WorldTileComponentDeserializer implements JsonDeserializer<AbstractWorldTileComponent> {
     
