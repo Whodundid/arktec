@@ -12,6 +12,8 @@ var _next_spawn_index := 0
 var _spawned_units: Array[Entity] = []
 
 func _unhandled_input(event: InputEvent) -> void:
+	if not NetworkSession.is_simulation_authority():
+		return
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
 	if event.keycode == KEY_F5:
@@ -26,6 +28,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 func spawn_unit() -> Entity:
+	if not NetworkSession.is_simulation_authority():
+		return null
 	if unit_scene == null:
 		return null
 	var unit := unit_scene.instantiate() as Entity
@@ -50,6 +54,8 @@ func spawn_unit() -> Entity:
 	return unit
 
 func _clear_units() -> void:
+	if not NetworkSession.is_simulation_authority():
+		return
 	for unit in _spawned_units:
 		if is_instance_valid(unit):
 			unit.queue_free()

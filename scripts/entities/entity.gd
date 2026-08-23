@@ -6,6 +6,8 @@ extends CharacterBody2D
 var _components: Array[EntityComponent] = []
 var is_selected := false
 var facing_direction := Vector2.UP
+@export var network_entity_id := 0
+@export var owning_peer_id := 1 # Server peer by default.
 @export_range(0.0, 1440.0, 1.0) var turning_rate_degrees_per_second := 720.0
 @export_range(0.0, 64.0, 0.5) var collision_radius := 12.0
 @export_range(0.0, 8.0, 0.1) var collision_leeway := 2.0
@@ -19,6 +21,9 @@ var _last_teammate_push_entity_id := -1
 var _formation_collision_ignored: Array[Entity] = []
 
 func _ready() -> void:
+	network_entity_id = NetworkSession.register_entity(self, network_entity_id)
+	tree_exiting.connect(_unregister_network_entity)
+	NetworkSession.session_mode_changed.connect(_on_session_mode_changed)
 	add_to_group("entities")
 	if grounded:
 		# Structures are solid to units and are also projectile/LOS blockers.
@@ -34,6 +39,24 @@ func _ready() -> void:
 
 	for component in _components:
 		component.on_entity_ready()
+	_update_component_authority()
+
+func is_simulation_authority() -> bool:
+	return NetworkSession.is_simulation_authority()
+
+func is_owned_by_peer(peer_id: int) -> bool:
+	return owning_peer_id == peer_id
+
+func _on_session_mode_changed(_mode: int) -> void:
+	_update_component_authority()
+
+func _update_component_authority() -> void:
+	var authority_enabled := is_simulation_authority()
+	for component in _components:
+		component.set_physics_process(authority_enabled)
+
+func _unregister_network_entity() -> void:
+	NetworkSession.unregister_entity(network_entity_id, self)
 
 func get_component(component_type: Variant) -> EntityComponent:
 	for component in _components:
@@ -100,6 +123,13 @@ func push_teammates(direction: Vector2, distance: float) -> void:
 		var other_team := other.get_component(TeamComponent) as TeamComponent
 		if other_team == null or other_team.team != own_team.team or other.grounded or other.is_hold_position() or is_formation_collision_ignored(other):
 			continue
+		var other_movement := other.get_component(MovementComponent) as MovementComponent
+		var other_is_moving := other_movement != null and other_movement.is_moving()
+		# Give opposite-direction traffic a deterministic right of way. Without
+		# this, both CharacterBodies can push each other on the same frame and
+		# repeatedly undo the other's sidestep.
+		if other_is_moving and get_instance_id() > other.get_instance_id():
+			continue
 
 		var offset := other.global_position - global_position
 		var distance_between := offset.length()
@@ -112,8 +142,6 @@ func push_teammates(direction: Vector2, distance: float) -> void:
 		if desired_direction.dot(to_other_direction) < 0.15:
 			continue
 
-		var other_movement := other.get_component(MovementComponent) as MovementComponent
-		var other_is_moving := other_movement != null and other_movement.is_moving()
 		var physics_frame := Engine.get_physics_frames()
 		if _last_teammate_push_frame == physics_frame and _last_teammate_push_entity_id == other.get_instance_id():
 			continue

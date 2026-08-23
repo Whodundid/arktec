@@ -14,6 +14,8 @@ func _ready() -> void:
 	queue_redraw()
 
 func _physics_process(delta: float) -> void:
+	if not NetworkSession.is_simulation_authority():
+		return
 	if not is_instance_valid(target):
 		queue_free()
 		return
@@ -33,7 +35,7 @@ func _on_body_entered(body: Node2D) -> void:
 	if body == target and body is Entity:
 		var target_health := (body as Entity).get_component(HealthComponent) as HealthComponent
 		if target_health != null:
-			target_health.damage(damage)
+			target_health.damage(damage, source)
 		queue_free()
 		return
 	if body is CollisionObject2D and (body as CollisionObject2D).get_collision_layer_value(6):
@@ -44,7 +46,7 @@ func _on_body_entered(body: Node2D) -> void:
 	var health := (body as Entity).get_component(HealthComponent) as HealthComponent
 	if health == null:
 		return
-	health.damage(damage)
+	health.damage(damage, source)
 	queue_free()
 
 func _draw() -> void:

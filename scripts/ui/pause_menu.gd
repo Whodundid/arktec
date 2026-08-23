@@ -10,6 +10,9 @@ var _hint: Label
 var _settings_section: VBoxContainer
 var _camera_speed_slider: HSlider
 var _camera_speed_value: Label
+var _tile_details_check: CheckButton
+var _nameplates_check: CheckButton
+var _team_markers_check: CheckButton
 
 func _ready() -> void:
 	# The menu must receive Escape both before and after pausing.
@@ -47,7 +50,7 @@ func _build_ui() -> void:
 	_overlay.add_child(center)
 
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(360.0, 300.0)
+	panel.custom_minimum_size = Vector2(400.0, 500.0)
 	panel.add_theme_stylebox_override("panel", _panel_style(Color("101b25f5"), Color("6b9a9d"), 3))
 	center.add_child(panel)
 
@@ -120,6 +123,29 @@ func _build_ui() -> void:
 	_settings_section.add_child(_camera_speed_value)
 	_update_camera_speed_label(_camera_speed_slider.value)
 
+	var diagnostics_title := Label.new()
+	diagnostics_title.text = "RENDER DIAGNOSTICS"
+	diagnostics_title.add_theme_color_override("font_color", Color("f4d58b"))
+	_settings_section.add_child(diagnostics_title)
+
+	_tile_details_check = CheckButton.new()
+	_tile_details_check.text = "Tile details"
+	_tile_details_check.button_pressed = _current_tile_details_enabled()
+	_tile_details_check.toggled.connect(_on_tile_details_toggled)
+	_settings_section.add_child(_tile_details_check)
+
+	_nameplates_check = CheckButton.new()
+	_nameplates_check.text = "Unit nameplates"
+	_nameplates_check.button_pressed = CharacterEntity.show_nameplates
+	_nameplates_check.toggled.connect(_on_nameplates_toggled)
+	_settings_section.add_child(_nameplates_check)
+
+	_team_markers_check = CheckButton.new()
+	_team_markers_check.text = "Team markers"
+	_team_markers_check.button_pressed = CharacterEntity.show_team_markers
+	_team_markers_check.toggled.connect(_on_team_markers_toggled)
+	_settings_section.add_child(_team_markers_check)
+
 	var back_button := Button.new()
 	back_button.text = "BACK"
 	back_button.custom_minimum_size.y = 42.0
@@ -158,6 +184,33 @@ func _on_camera_speed_changed(value: float) -> void:
 func _update_camera_speed_label(value: float) -> void:
 	if _camera_speed_value != null:
 		_camera_speed_value.text = "%d px/s" % roundi(value)
+
+func _current_tile_details_enabled() -> bool:
+	var maps := get_tree().get_nodes_in_group("terrain_maps")
+	if maps.is_empty():
+		return true
+	var terrain_map := maps[0] as TerrainMap
+	return terrain_map.draw_tile_details if terrain_map != null else true
+
+func _on_tile_details_toggled(enabled: bool) -> void:
+	for terrain in get_tree().get_nodes_in_group("terrain_maps"):
+		var terrain_map := terrain as TerrainMap
+		if terrain_map != null:
+			terrain_map.draw_tile_details = enabled
+			terrain_map.queue_redraw()
+
+func _on_nameplates_toggled(enabled: bool) -> void:
+	CharacterEntity.show_nameplates = enabled
+	_queue_entity_redraws()
+
+func _on_team_markers_toggled(enabled: bool) -> void:
+	CharacterEntity.show_team_markers = enabled
+	_queue_entity_redraws()
+
+func _queue_entity_redraws() -> void:
+	for candidate in get_tree().get_nodes_in_group("entities"):
+		if candidate is Entity:
+			(candidate as Entity).queue_redraw()
 
 func _get_camera() -> Node:
 	var cameras := get_tree().get_nodes_in_group("rts_cameras")

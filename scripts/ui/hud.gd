@@ -6,6 +6,9 @@ const MAX_DISPLAYED_UNITS := 6
 const UNIT_CARD_SIZE := Vector2(72, 36)
 const UNIT_CARD_GAP := 6.0
 var _active_inspected_entity: Entity
+var _ups_sample_elapsed := 0.0
+var _ups_last_physics_frame := 0
+var _ups_value := 0
 
 func _ready() -> void:
 	set_process(true)
@@ -34,7 +37,9 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		if event.is_action_pressed("hold_position"):
-			combat.set_auto_target_mode(CombatComponent.AUTO_HOLD_POSITION)
+			var group_controller := _group_controller()
+			if group_controller != null:
+				group_controller.request_stance(CombatComponent.AUTO_HOLD_POSITION)
 			get_viewport().set_input_as_handled()
 			return
 
@@ -44,10 +49,14 @@ func _input(event: InputEvent) -> void:
 		return
 	var buttons := _command_button_rects()
 	if buttons[0].has_point(event.position):
-		combat.set_auto_target_mode(CombatComponent.AUTO_ATTACK_MOVE)
+		var group_controller := _group_controller()
+		if group_controller != null:
+			group_controller.request_stance(CombatComponent.AUTO_ATTACK_MOVE)
 		get_viewport().set_input_as_handled()
 	elif buttons[1].has_point(event.position):
-		combat.set_auto_target_mode(CombatComponent.AUTO_HOLD_POSITION)
+		var group_controller := _group_controller()
+		if group_controller != null:
+			group_controller.request_stance(CombatComponent.AUTO_HOLD_POSITION)
 		get_viewport().set_input_as_handled()
 	elif combat.attack_move_armed:
 		var world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * event.position
@@ -58,18 +67,23 @@ func _input(event: InputEvent) -> void:
 			combat.confirm_attack_move(world_position)
 		get_viewport().set_input_as_handled()
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	_sync_active_inspection()
+	_ups_sample_elapsed += delta
+	if _ups_sample_elapsed >= 0.5:
+		var current_physics_frame := Engine.get_physics_frames()
+		_ups_value = roundi(float(current_physics_frame - _ups_last_physics_frame) / _ups_sample_elapsed)
+		_ups_last_physics_frame = current_physics_frame
+		_ups_sample_elapsed = 0.0
 	queue_redraw()
 
 func _draw() -> void:
 	var size := get_viewport_rect().size
-	var panel := Rect2(28, 28, 330, 132)
-	draw_style_box(_panel(Color("101b25d9"), Color("4d6f78")), panel)
-	draw_string(title_font, Vector2(48, 66), "ARTIFACT RUN", HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color("f4d58b"))
-	draw_string(small_font, Vector2(48, 94), "VERTICAL SLICE // FIELD BOOTSTRAP", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("9cb5b5"))
-	draw_string(small_font, Vector2(48, 128), "DAY 01    10:42    OUTPOST SECURE", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("dce5df"))
-
+	var performance_panel := Rect2(28, 28, 220, 78)
+	draw_style_box(_panel(Color("101b25"), Color("4d6f78")), performance_panel)
+	draw_string(small_font, performance_panel.position + Vector2(12, 22), "FPS: %3d" % Engine.get_frames_per_second(), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("dce5df"))
+	draw_string(small_font, performance_panel.position + Vector2(12, 42), "UPS: %3d" % _ups_value, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("9cb5b5"))
+	draw_string(small_font, performance_panel.position + Vector2(12, 64), "Diagnostics: ESC > SETTINGS", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("718f91"))
 	var formation_text := "OFF"
 	var formation_controllers := get_tree().get_nodes_in_group("group_movement_controller")
 	if not formation_controllers.is_empty() and (formation_controllers[0] as GroupMovementController).is_formation_enabled():
@@ -91,6 +105,7 @@ func _draw() -> void:
 		if health != null:
 			var health_text := "HP %d / %d" % [roundi(health.current_health), roundi(health.maximum_health)]
 			draw_string(small_font, buttons[0].position + Vector2(0, -26), health_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("dce5df"))
+	_draw_ai_debug_panel(selected_entity, size)
 	var combat := _selected_combat()
 	if combat != null:
 		_draw_command_button(buttons[0], "ATTACK-MOVE", combat.auto_target_mode == CombatComponent.AUTO_ATTACK_MOVE)
@@ -101,6 +116,30 @@ func _selected_combat() -> CombatComponent:
 	if selected_entity != null and _is_player_owned(selected_entity):
 		return selected_entity.get_component(CombatComponent) as CombatComponent
 	return null
+
+func _draw_ai_debug_panel(selected_entity: Entity, viewport_size: Vector2) -> void:
+	var panel_rect := Rect2(viewport_size.x - 340.0, viewport_size.y - 190.0, 312.0, 132.0)
+	draw_style_box(_panel(Color("101b25"), Color("4d6f78")), panel_rect)
+	draw_string(title_font, panel_rect.position + Vector2(16, 22), "AI DEBUG", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("f4d58b"))
+	if selected_entity == null:
+		draw_string(small_font, panel_rect.position + Vector2(16, 48), "Select an AI unit to inspect", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("9cb5b5"))
+		return
+	var alert := selected_entity.get_component(AlertComponent) as AlertComponent
+	if alert == null:
+		draw_string(small_font, panel_rect.position + Vector2(16, 48), "Selected entity has no AI", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("9cb5b5"))
+		return
+	var team := selected_entity.get_component(TeamComponent) as TeamComponent
+	var faction := "Unknown"
+	if team != null:
+		faction = TeamComponent.Team.keys()[team.team].capitalize()
+	draw_string(small_font, panel_rect.position + Vector2(16, 45), "%s   %s" % [faction, AlertComponent.get_role_name(alert.role)], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, selected_entity.selection_color())
+	draw_string(small_font, panel_rect.position + Vector2(16, 66), "Now:  " + alert.get_debug_active_action(), HORIZONTAL_ALIGNMENT_LEFT, panel_rect.size.x - 28.0, 12, Color("dce5df"))
+	draw_string(small_font, panel_rect.position + Vector2(16, 86), "Next: " + alert.get_debug_next_goal(), HORIZONTAL_ALIGNMENT_LEFT, panel_rect.size.x - 28.0, 12, Color("9cb5b5"))
+	var movement := selected_entity.get_component(MovementComponent) as MovementComponent
+	var destination_text := "none"
+	if movement != null and movement.get_destination_position() is Vector2:
+		destination_text = "(%d, %d)" % [roundi((movement.get_destination_position() as Vector2).x), roundi((movement.get_destination_position() as Vector2).y)]
+	draw_string(small_font, panel_rect.position + Vector2(16, 106), "Destination: " + destination_text, HORIZONTAL_ALIGNMENT_LEFT, panel_rect.size.x - 28.0, 11, Color("718f91"))
 
 func _group_controller() -> GroupMovementController:
 	var controllers := get_tree().get_nodes_in_group("group_movement_controller")

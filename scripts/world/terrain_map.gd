@@ -15,11 +15,12 @@ enum TileType {
 	WATER,
 }
 
-@export var columns := 20
-@export var rows := 12
+@export var columns := 28
+@export var rows := 16
 @export var tile_size := 64.0
-@export var map_origin := Vector2(-640.0, -384.0)
+@export var map_origin := Vector2(-896.0, -512.0)
 @export var draw_grid := true
+@export var draw_tile_details := true
 
 const TILE_COLORS := {
 	TileType.GRASS: Color("4d7c59"),
@@ -77,12 +78,45 @@ func _build_test_map() -> void:
 		for x in range(13, 17):
 			_set_tile(Vector2i(x, y), TileType.WATER)
 
-	# Stone forms a compact wall with a deliberate one-tile gap to test paths.
-	for x in range(5, 11):
-		if x != 8:
+	# Several stone sections create deliberate LOS breaks and flanking routes.
+	# Each section has a gap so units can still route through the area.
+	for x in range(6, 14):
+		if x != 10:
 			_set_tile(Vector2i(x, 8), TileType.STONE)
-	for y in range(8, 10):
-		_set_tile(Vector2i(5, y), TileType.STONE)
+	for y in range(8, 12):
+		if y != 10:
+			_set_tile(Vector2i(6, y), TileType.STONE)
+	for y in range(2, 7):
+		if y != 5:
+			_set_tile(Vector2i(15, y), TileType.STONE)
+	for x in range(15, 21):
+		if x != 18:
+			_set_tile(Vector2i(x, 6), TileType.STONE)
+	for x in range(20, 26):
+		if x != 23:
+			_set_tile(Vector2i(x, 12), TileType.STONE)
+	for y in range(10, 13):
+		if y != 11:
+			_set_tile(Vector2i(20, y), TileType.STONE)
+
+	# The battle sandbox uses a map twice this size. Add a second set of
+	# offset stone sections there so the extra space creates routes and LOS
+	# decisions instead of becoming one enormous empty field. These cells are
+	# outside the normal 28-column slice and therefore do not affect main.tscn.
+	if columns >= 40:
+		for x in range(30, 39):
+			# Keep the fixed Blue sandbox base at world (650, 0) on open terrain.
+			if x != 34 and x != 38:
+				_set_tile(Vector2i(x, 16), TileType.STONE)
+		for y in range(16, 23):
+			if y != 20:
+				_set_tile(Vector2i(42, y), TileType.STONE)
+		for x in range(40, 52):
+			if x != 46:
+				_set_tile(Vector2i(x, 25), TileType.STONE)
+		for y in range(4, 12):
+			if y != 8:
+				_set_tile(Vector2i(49, y), TileType.STONE)
 
 func _build_navigation_grid() -> void:
 	_navigation_grid.region = Rect2i(0, 0, columns, rows)
@@ -152,8 +186,42 @@ func _draw() -> void:
 			var tile_type: int = tiles[y][x]
 			var rect := Rect2(cell_to_world(cell), Vector2.ONE * tile_size)
 			draw_rect(rect, tile_color(tile_type), true)
+			if draw_tile_details:
+				draw_tile_detail(cell, rect, tile_type)
 			if draw_grid:
 				draw_rect(rect, Color(0.06, 0.09, 0.10, 0.28), false, 1.0)
+
+func draw_tile_detail(cell: Vector2i, rect: Rect2, tile_type: int) -> void:
+	# Keep decoration deterministic so editor redraws and multiplayer clients
+	# see the same terrain without storing any extra tile state.
+	var seed_value := absi(cell.x * 92821 + cell.y * 68917 + tile_type * 31337)
+	var center := rect.position + rect.size * 0.5
+	match tile_type:
+		TileType.GRASS:
+			for index in range(2):
+				var offset := Vector2(
+					float((seed_value >> (index * 3)) % 38) - 19.0,
+					float((seed_value >> (index * 5 + 2)) % 34) - 17.0
+				)
+				var blade_base := center + offset
+				draw_line(blade_base, blade_base + Vector2(-2.0, -5.0), Color(0.20, 0.38, 0.25, 0.28), 1.0)
+				draw_line(blade_base, blade_base + Vector2(2.0, -4.0), Color(0.26, 0.45, 0.29, 0.22), 1.0)
+		TileType.DIRT:
+			var line_color := Color(0.35, 0.22, 0.15, 0.24)
+			for index in range(2):
+				var y_offset := float((seed_value >> (index * 4)) % 30) - 15.0
+				var x_offset := float((seed_value >> (index * 6 + 1)) % 18) - 9.0
+				draw_line(center + Vector2(-22.0 + x_offset, y_offset), center + Vector2(12.0 + x_offset, y_offset + 2.0), line_color, 1.0)
+		TileType.STONE:
+			var crack_color := Color(0.25, 0.29, 0.31, 0.42)
+			var crack_start := center + Vector2(float(seed_value % 20) - 10.0, -8.0)
+			draw_line(crack_start, crack_start + Vector2(-7.0, 7.0), crack_color, 1.0)
+			draw_line(crack_start + Vector2(-7.0, 7.0), crack_start + Vector2(2.0, 13.0), crack_color, 1.0)
+		TileType.WATER:
+			var ripple_color := Color(0.42, 0.73, 0.78, 0.28)
+			var ripple_offset := float(seed_value % 18) - 9.0
+			draw_line(center + Vector2(-21.0, ripple_offset), center + Vector2(-5.0, ripple_offset - 1.0), ripple_color, 1.0)
+			draw_line(center + Vector2(5.0, ripple_offset + 5.0), center + Vector2(22.0, ripple_offset + 4.0), ripple_color, 1.0)
 
 func cell_to_world(cell: Vector2i) -> Vector2:
 	return map_origin + Vector2(cell) * tile_size

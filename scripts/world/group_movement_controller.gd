@@ -19,9 +19,13 @@ var _formation_duration := 0.0
 var _formation_group_speed := 0.0
 var _formation_retarget_remaining := 0.0
 const FORMATION_RETARGET_INTERVAL := 0.12
+const COMMAND_CONTEXT_ORDER := &"context_order"
+const COMMAND_ATTACK_MOVE := &"attack_move"
+const COMMAND_STANCE := &"stance"
 
 func _ready() -> void:
 	add_to_group("group_movement_controller")
+	NetworkSession.command_received.connect(_on_network_command)
 	set_process(true)
 
 func _process(delta: float) -> void:
@@ -49,10 +53,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	var world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * event.position
 	# A right-click on an enemy is an explicit attack order. Right-clicking
 	# elsewhere remains a manual move and ignores enemies encountered in range.
-	if _try_issue_attack(selected, world_position):
-		get_viewport().set_input_as_handled()
-		return
-	_issue_move(selected, world_position)
+	NetworkSession.submit_command(COMMAND_CONTEXT_ORDER, _entity_ids(selected), {"destination": world_position, "formation": formation_enabled})
 	get_viewport().set_input_as_handled()
 
 func is_formation_enabled() -> bool:
@@ -83,7 +84,7 @@ func _selected_player_entities() -> Array[Entity]:
 			continue
 		var entity := candidate as Entity
 		var team := entity.get_component(TeamComponent) as TeamComponent
-		if team != null and team.is_player_controlled() and entity.get_component(MovementComponent) != null:
+		if team != null and team.is_player_controlled() and entity.is_owned_by_peer(NetworkSession.get_local_peer_id()) and entity.get_component(MovementComponent) != null:
 			selected.append(entity)
 	return selected
 
@@ -104,9 +105,74 @@ func confirm_attack_move(destination: Vector2) -> void:
 	var selected := _selected_player_entities()
 	if not _has_attack_move_armed(selected):
 		return
-	if _try_issue_attack(selected, destination):
+	NetworkSession.submit_command(COMMAND_ATTACK_MOVE, _entity_ids(selected), {"destination": destination, "formation": formation_enabled})
+
+func request_stance(mode: int) -> void:
+	var selected := _selected_player_entities()
+	if selected.is_empty():
 		return
-	_confirm_attack_move(selected, destination)
+	NetworkSession.submit_command(COMMAND_STANCE, _entity_ids(selected), {"mode": mode})
+
+func _on_network_command(sender_peer_id: int, command_type: StringName, entity_ids: Array, payload: Dictionary) -> void:
+	if command_type != COMMAND_CONTEXT_ORDER and command_type != COMMAND_ATTACK_MOVE and command_type != COMMAND_STANCE:
+		return
+	var entities := _resolve_owned_entities(sender_peer_id, entity_ids)
+	if entities.is_empty():
+		return
+
+	if command_type == COMMAND_STANCE:
+		var mode := int(payload.get("mode", -1))
+		if mode != CombatComponent.AUTO_ATTACK_MOVE and mode != CombatComponent.AUTO_HOLD_POSITION:
+			return
+		for entity in entities:
+			var combat := entity.get_component(CombatComponent) as CombatComponent
+			if combat != null:
+				combat.set_auto_target_mode(mode)
+		return
+
+	var destination_value: Variant = payload.get("destination")
+	if not destination_value is Vector2:
+		return
+	var destination := destination_value as Vector2
+	if not destination.is_finite():
+		return
+	var previous_formation_mode := formation_enabled
+	formation_enabled = bool(payload.get("formation", false))
+	if command_type == COMMAND_CONTEXT_ORDER:
+		if not _try_issue_attack(entities, destination):
+			_issue_move(entities, destination)
+	else:
+		for entity in entities:
+			var combat := entity.get_component(CombatComponent) as CombatComponent
+			if combat != null:
+				combat.arm_attack_move()
+		if not _try_issue_attack(entities, destination):
+			_confirm_attack_move(entities, destination)
+	formation_enabled = previous_formation_mode
+
+func _entity_ids(entities: Array[Entity]) -> Array:
+	var ids: Array = []
+	for entity in entities:
+		if entity.network_entity_id > 0:
+			ids.append(entity.network_entity_id)
+	return ids
+
+func _resolve_owned_entities(sender_peer_id: int, entity_ids: Array) -> Array[Entity]:
+	var resolved: Array[Entity] = []
+	var seen: Dictionary = {}
+	for id_value in entity_ids:
+		var entity_id := int(id_value)
+		if entity_id <= 0 or seen.has(entity_id):
+			continue
+		seen[entity_id] = true
+		var entity := NetworkSession.get_entity(entity_id)
+		if entity == null or not entity.is_owned_by_peer(sender_peer_id):
+			continue
+		var team := entity.get_component(TeamComponent) as TeamComponent
+		if team == null or not team.is_player_controlled() or entity.get_component(MovementComponent) == null:
+			continue
+		resolved.append(entity)
+	return resolved
 
 func _has_attack_move_armed(selected: Array[Entity]) -> bool:
 	for entity in selected:

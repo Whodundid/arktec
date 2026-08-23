@@ -11,6 +11,7 @@ extends Camera2D
 @export var min_zoom := 0.65
 @export var max_zoom := 1.6
 @export var world_limits := Rect2(-900.0, -520.0, 1800.0, 1040.0)
+@export_range(0.0, 200.0, 1.0) var bottom_ui_safe_area := 76.0
 
 var _dragging := false
 
@@ -66,7 +67,11 @@ func _set_zoom(value: float) -> void:
 
 func _clamp_position(value: Vector2) -> Vector2:
 	var half_view := get_viewport_rect().size * 0.5 / zoom.x
+	# Keep the bottom edge of the world above the persistent HUD strip. The
+	# safe area is authored in screen pixels, so convert it back into world
+	# units at the current zoom level before applying the camera limit.
+	var bottom_world_limit := world_limits.end.y - bottom_ui_safe_area / zoom.x
 	return Vector2(
 		clampf(value.x, world_limits.position.x + half_view.x, world_limits.end.x - half_view.x),
-		clampf(value.y, world_limits.position.y + half_view.y, world_limits.end.y - half_view.y)
+		clampf(value.y, world_limits.position.y + half_view.y, bottom_world_limit - half_view.y)
 	)

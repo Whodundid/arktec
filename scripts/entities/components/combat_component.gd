@@ -42,6 +42,10 @@ func _physics_process(delta: float) -> void:
 	if target == null and not _manual_move_active and _attack_move_active and auto_target_mode == AutoTargetMode.ATTACK_MOVE:
 		_acquire_nearest_visible_target()
 	if movement != null and movement.is_moving():
+		# Attack parties may have a strategic building target, but they should
+		# still react to hostile units they encounter on the way there.
+		if target != null and target.grounded and _acquire_nearest_visible_unit():
+			return
 		if not _movement_blocked_last_frame:
 			attack_stopped.emit("moving")
 		_movement_blocked_last_frame = true
@@ -128,11 +132,11 @@ func begin_manual_move() -> void:
 	_manual_move_active = true
 	_clear_target("manual_move")
 
-func set_target(new_target: Entity) -> void:
+func set_target(new_target: Entity, stop_movement: bool = true) -> void:
 	if not _is_opponent(new_target):
 		return
 	var movement := entity.get_component(MovementComponent) as MovementComponent
-	if movement != null:
+	if stop_movement and movement != null:
 		movement.stop()
 	target = new_target
 	attack_move_armed = false
@@ -144,6 +148,9 @@ func set_target(new_target: Entity) -> void:
 
 func clear_target(reason: String = "manual") -> void:
 	_clear_target(reason)
+
+func is_manual_move_active() -> bool:
+	return _manual_move_active
 
 func set_auto_target_mode(new_mode: int) -> void:
 	auto_target_mode = new_mode
@@ -183,6 +190,33 @@ func _acquire_nearest_visible_target() -> bool:
 		target_changed.emit(target)
 		return true
 	return false
+
+func _acquire_nearest_visible_unit() -> bool:
+	var best_target: Entity = null
+	var best_distance := INF
+	for candidate in get_tree().get_nodes_in_group("entities"):
+		if not candidate is Entity or candidate == entity:
+			continue
+		var possible_target := candidate as Entity
+		if possible_target.grounded or not _is_opponent(possible_target) or not is_instance_valid(possible_target.get_component(HealthComponent)):
+			continue
+		var distance := entity.global_position.distance_to(possible_target.global_position)
+		if distance > attack_range or distance >= best_distance:
+			continue
+		if not _has_line_of_sight_to(possible_target):
+			continue
+		best_target = possible_target
+		best_distance = distance
+
+	if best_target == null:
+		return false
+	target = best_target
+	var movement := entity.get_component(MovementComponent) as MovementComponent
+	if movement != null:
+		movement.stop()
+	_cooldown = 0.0
+	target_changed.emit(target)
+	return true
 
 func _fire() -> void:
 	if projectile_scene == null:

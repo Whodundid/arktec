@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://scripts/entities/character_entity.gd" id="1_character"]
 [ext_resource type="Script" path="res://scripts/entities/components/health_component.gd" id="3_health"]
@@ -7,6 +7,8 @@
 [ext_resource type="Script" path="res://scripts/entities/components/team_component.gd" id="5_team"]
 [ext_resource type="Script" path="res://scripts/entities/components/mouse_control_component.gd" id="6_mouse_control"]
 [ext_resource type="Script" path="res://scripts/entities/components/combat_component.gd" id="7_combat"]
+[ext_resource type="Script" path="res://scripts/entities/components/wander_component.gd" id="10_wander"]
+[ext_resource type="Script" path="res://scripts/entities/components/alert_component.gd" id="11_alert"]
 [ext_resource type="PackedScene" path="res://scenes/combat/ranged_projectile.tscn" id="8_projectile"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_character"]
@@ -40,3 +42,9 @@ script = ExtResource("6_mouse_control")
 [node name="CombatComponent" type="Node" parent="."]
 script = ExtResource("7_combat")
 projectile_scene = ExtResource("8_projectile")
+
+[node name="WanderComponent" type="Node" parent="."]
+script = ExtResource("10_wander")
+
+[node name="AlertComponent" type="Node" parent="."]
+script = ExtResource("11_alert")

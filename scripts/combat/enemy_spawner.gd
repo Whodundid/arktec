@@ -15,6 +15,8 @@ var _next_spawn_index := 0
 var _active_enemies: Array[Entity] = []
 
 func _unhandled_input(event: InputEvent) -> void:
+	if not NetworkSession.is_simulation_authority():
+		return
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
 	if event.keycode == KEY_F1:
@@ -26,6 +28,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_clear_enemies()
 
 func spawn_enemy() -> Entity:
+	if not NetworkSession.is_simulation_authority():
+		return null
 	if enemy_scene == null:
 		return null
 	var enemy := enemy_scene.instantiate() as Entity
@@ -39,6 +43,12 @@ func spawn_enemy() -> Entity:
 	enemy.collision_mask = 15
 	var team := enemy.get_component(TeamComponent) as TeamComponent
 	team.team = TeamComponent.Team.ENEMY
+	var wander := enemy.get_component(WanderComponent) as WanderComponent
+	if wander != null:
+		wander.enabled = true
+	var alert := enemy.get_component(AlertComponent) as AlertComponent
+	if alert != null:
+		alert.enabled = true
 	var health := enemy.get_component(HealthComponent) as HealthComponent
 	health.died.connect(_on_enemy_died.bind(enemy))
 	get_tree().current_scene.add_child(enemy)
@@ -60,6 +70,8 @@ func _remove_dead_enemy(enemy: Entity) -> void:
 		enemy.queue_free()
 
 func _clear_enemies() -> void:
+	if not NetworkSession.is_simulation_authority():
+		return
 	for enemy in _active_enemies:
 		if is_instance_valid(enemy):
 			enemy.queue_free()
