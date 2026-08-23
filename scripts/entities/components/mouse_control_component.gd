@@ -22,20 +22,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			if mouse_position.distance_to(entity.global_position) <= selection_radius:
 				_select_entity()
 				get_viewport().set_input_as_handled()
-		elif event.button_index == MOUSE_BUTTON_RIGHT and selected:
-			var combat := entity.get_component(CombatComponent) as CombatComponent
-			if combat != null and combat.try_set_target_at(mouse_position):
-				get_viewport().set_input_as_handled()
-				return
-			var movement := entity.get_component(MovementComponent) as MovementComponent
-			if movement != null:
-				# A player-issued move is a new order, not combat's internal
-				# repositioning request. Cancel the old attack so the entity does
-				# not walk back after reaching the commanded destination.
-				if combat != null:
-					combat.begin_manual_move()
-				movement.move_to(mouse_position)
-				get_viewport().set_input_as_handled()
 
 func set_selected(value: bool) -> void:
 	selected = value

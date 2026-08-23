@@ -13,6 +13,7 @@ var destination_position: Variant = null
 var destination_marker_remaining := 0.0
 var _path: Array[Vector2] = []
 var _path_index := 0
+var _formation_speed_pixels_per_second := -1.0
 
 @export var stopping_distance := 4.0
 @export var path_clearance := 12.0
@@ -34,17 +35,33 @@ func _physics_process(_delta: float) -> void:
 	var direction := move_direction.normalized()
 	if direction != Vector2.ZERO:
 		entity.turn_towards(direction, _delta)
-	entity.velocity = direction * speed_meters_per_second * pixels_per_meter
+	var movement_speed := speed_meters_per_second * pixels_per_meter
+	if _formation_speed_pixels_per_second >= 0.0:
+		movement_speed = minf(movement_speed, _formation_speed_pixels_per_second)
+	entity.velocity = direction * movement_speed
+	if direction != Vector2.ZERO:
+		entity.push_teammates(direction, entity.velocity.length() * _delta)
 	entity.move_and_slide()
+	if direction != Vector2.ZERO:
+		for collision_index in range(entity.get_slide_collision_count()):
+			var collider := entity.get_slide_collision(collision_index).get_collider()
+			if collider is Entity and entity.is_teammate(collider as Entity):
+				# The first push is predictive; this second pass reacts to the
+				# actual contact so head-on units get a chance to slide around one
+				# another on the same movement order.
+				entity.push_teammates(direction, entity.collision_leeway)
+				break
 
 func set_move_direction(direction: Vector2) -> void:
 	_clear_path()
+	_clear_formation_speed()
 	target_position = null
 	destination_position = null
 	destination_marker_remaining = 0.0
 	move_direction = direction
 
 func move_to(destination: Vector2) -> void:
+	_clear_formation_speed()
 	destination_position = destination
 	var terrain_map := _find_terrain_map()
 	if terrain_map != null:
@@ -72,6 +89,7 @@ func clear_target() -> void:
 
 func stop() -> void:
 	_clear_path()
+	_clear_formation_speed()
 	target_position = null
 	destination_position = null
 	destination_marker_remaining = 0.0
@@ -85,6 +103,15 @@ func get_destination_position() -> Variant:
 
 func get_destination_marker_alpha() -> float:
 	return clampf(destination_marker_remaining / 0.5, 0.0, 1.0)
+
+func get_move_speed_pixels_per_second() -> float:
+	return speed_meters_per_second * pixels_per_meter
+
+func set_formation_speed_pixels_per_second(value: float) -> void:
+	_formation_speed_pixels_per_second = maxf(value, 0.0)
+
+func _clear_formation_speed() -> void:
+	_formation_speed_pixels_per_second = -1.0
 
 func _follow_path() -> void:
 	if _path_index >= _path.size():

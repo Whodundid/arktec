@@ -26,7 +26,11 @@ func _input(event: InputEvent) -> void:
 	var combat := _selected_combat()
 	if event is InputEventKey and event.pressed and not event.echo and combat != null:
 		if event.is_action_pressed("attack_move"):
-			combat.arm_attack_move()
+			var group_controller := _group_controller()
+			if group_controller != null:
+				group_controller.arm_attack_move()
+			else:
+				combat.arm_attack_move()
 			get_viewport().set_input_as_handled()
 			return
 		if event.is_action_pressed("hold_position"):
@@ -47,7 +51,10 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 	elif combat.attack_move_armed:
 		var world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * event.position
-		if not combat.try_set_target_at(world_position):
+		var group_controller := _group_controller()
+		if group_controller != null and group_controller.has_attack_move_armed():
+			group_controller.confirm_attack_move(world_position)
+		elif not combat.try_set_target_at(world_position):
 			combat.confirm_attack_move(world_position)
 		get_viewport().set_input_as_handled()
 
@@ -63,7 +70,11 @@ func _draw() -> void:
 	draw_string(small_font, Vector2(48, 94), "VERTICAL SLICE // FIELD BOOTSTRAP", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("9cb5b5"))
 	draw_string(small_font, Vector2(48, 128), "DAY 01    10:42    OUTPOST SECURE", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("dce5df"))
 
-	draw_string(small_font, Vector2(48, size.y - 60), "RIGHT-CLICK   MOVE     A   ATTACK-MOVE     H   HOLD", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("dce5df"))
+	var formation_text := "OFF"
+	var formation_controllers := get_tree().get_nodes_in_group("group_movement_controller")
+	if not formation_controllers.is_empty() and (formation_controllers[0] as GroupMovementController).is_formation_enabled():
+		formation_text = "ON"
+	draw_string(small_font, Vector2(48, size.y - 60), "RIGHT-CLICK MOVE   F4 FORMATION %s   F5 SQUAD   F6 UNIT   F7 CLEAR" % formation_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("dce5df"))
 
 	var buttons := _command_button_rects()
 	var selected_entities := _selected_entities()
@@ -90,6 +101,10 @@ func _selected_combat() -> CombatComponent:
 	if selected_entity != null and _is_player_owned(selected_entity):
 		return selected_entity.get_component(CombatComponent) as CombatComponent
 	return null
+
+func _group_controller() -> GroupMovementController:
+	var controllers := get_tree().get_nodes_in_group("group_movement_controller")
+	return controllers[0] as GroupMovementController if not controllers.is_empty() else null
 
 func _is_player_owned(entity: Entity) -> bool:
 	var team := entity.get_component(TeamComponent) as TeamComponent

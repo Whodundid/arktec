@@ -100,14 +100,16 @@ func confirm_attack_move(destination: Vector2) -> void:
 	if not attack_move_armed:
 		return
 	attack_move_armed = false
-	# An existing attack has priority over an attack-move destination. The
-	# player can still use a right-click to explicitly break the attack.
-	if is_instance_valid(target) and _is_valid_target():
-		return
+	# A new attack-move order always replaces the previous attack or move.
 	if target != null:
-		_clear_target("attack_move_target_invalid")
+		_clear_target("attack_move_order")
 	_attack_move_active = true
 	_manual_move_active = false
+	# Resolve enemies already in range before issuing the travel order. This
+	# makes attack-move visibly different from a manual right-click immediately,
+	# instead of waiting for the next movement tick to discover the target.
+	if _acquire_nearest_visible_target():
+		return
 	var movement := entity.get_component(MovementComponent) as MovementComponent
 	if movement != null:
 		movement.move_to(destination)
@@ -155,7 +157,7 @@ func set_auto_target_mode(new_mode: int) -> void:
 	else:
 		_attack_move_active = true
 
-func _acquire_nearest_visible_target() -> void:
+func _acquire_nearest_visible_target() -> bool:
 	var best_target: Entity = null
 	var best_distance := INF
 	for candidate in get_tree().get_nodes_in_group("entities"):
@@ -179,6 +181,8 @@ func _acquire_nearest_visible_target() -> void:
 			movement.stop()
 		_cooldown = 0.0
 		target_changed.emit(target)
+		return true
+	return false
 
 func _fire() -> void:
 	if projectile_scene == null:
@@ -207,7 +211,12 @@ func _has_line_of_sight_to(candidate: Entity) -> bool:
 	var maps := get_tree().get_nodes_in_group("terrain_maps")
 	if maps.is_empty():
 		return true
-	return (maps[0] as TerrainMap).has_line_of_sight(entity.global_position, candidate.global_position, projectile_radius)
+	return (maps[0] as TerrainMap).has_line_of_sight(
+		entity.global_position,
+		candidate.global_position,
+		projectile_radius,
+		[candidate.get_rid()]
+	)
 
 func _request_line_of_sight_position(movement: MovementComponent) -> void:
 	_los_move_requested = true
@@ -218,7 +227,8 @@ func _request_line_of_sight_position(movement: MovementComponent) -> void:
 		entity.global_position,
 		target.global_position,
 		attack_range,
-		movement.path_clearance
+		movement.path_clearance,
+		[target.get_rid()]
 	)
 	if firing_position.is_empty():
 		attack_stopped.emit("no_line_of_sight_position")

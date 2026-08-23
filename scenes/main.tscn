@@ -11,6 +11,8 @@
 [ext_resource type="Script" path="res://scripts/combat/enemy_spawner.gd" id="9_spawner"]
 [ext_resource type="PackedScene" path="res://scenes/entities/enemy_spawner_building.tscn" id="10_building"]
 [ext_resource type="Script" path="res://scripts/world/move_order_markers.gd" id="11_move_markers"]
+[ext_resource type="Script" path="res://scripts/world/group_movement_controller.gd" id="12_group_movement"]
+[ext_resource type="Script" path="res://scripts/combat/player_unit_spawner.gd" id="13_player_spawner"]
 
 [node name="Main" type="Node2D" unique_id=1433394661]
 script = ExtResource("1_main")
@@ -32,7 +34,7 @@ position = Vector2(360, 0)
 display_name = "Enemy"
 body_color = Color(0.65, 0.22, 0.25, 1)
 collision_layer = 4
-collision_mask = 1
+collision_mask = 15
 
 [node name="TeamComponent" parent="Enemy" index="3"]
 team = 1
@@ -48,6 +50,13 @@ position = Vector2(80, -80)
 script = ExtResource("11_move_markers")
 # F3 toggles this at runtime when testing enemy pathfinding.
 show_all_entity_markers = false
+
+[node name="GroupMovementController" type="Node2D" parent="." unique_id=1600000004]
+script = ExtResource("12_group_movement")
+
+[node name="PlayerUnitSpawner" type="Node2D" parent="." unique_id=1600000005]
+script = ExtResource("13_player_spawner")
+unit_scene = ExtResource("5_character")
 
 [node name="HUD" type="CanvasLayer" parent="." unique_id=110415109]
 

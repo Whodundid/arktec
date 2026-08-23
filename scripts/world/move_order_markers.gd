@@ -15,10 +15,27 @@ func _process(_delta: float) -> void:
 	queue_redraw()
 
 func _draw() -> void:
+	var group_controllers := get_tree().get_nodes_in_group("group_movement_controller")
+	if not group_controllers.is_empty():
+		var group_controller := group_controllers[0] as GroupMovementController
+		if group_controller.has_group_marker():
+			var group_destination: Vector2 = group_controller.get_group_destination()
+			var group_alpha := group_controller.get_group_marker_alpha()
+			var group_color := group_controller.get_group_marker_color()
+			group_color.a = 0.9 * group_alpha
+			draw_circle(group_destination, 12.0, Color(0.02, 0.04, 0.05, 0.65 * group_alpha))
+			draw_arc(group_destination, 11.0, 0.0, TAU, 24, group_color, 2.0)
+			draw_line(group_destination - Vector2(16, 0), group_destination + Vector2(16, 0), group_color, 2.0)
+			draw_line(group_destination - Vector2(0, 16), group_destination + Vector2(0, 16), group_color, 2.0)
+
 	for candidate in get_tree().get_nodes_in_group("entities"):
 		if not candidate is Entity:
 			continue
 		var entity := candidate as Entity
+		if not group_controllers.is_empty():
+			var group_controller := group_controllers[0] as GroupMovementController
+			if group_controller.is_entity_in_group_order(entity) or group_controller.is_entity_in_formation(entity):
+				continue
 		var team := entity.get_component(TeamComponent) as TeamComponent
 		if not show_all_entity_markers and (team == null or not team.is_player_controlled()):
 			continue

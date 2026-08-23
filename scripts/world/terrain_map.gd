@@ -45,6 +45,7 @@ const TILE_BLOCKS_PROJECTILES := {
 }
 
 const PROJECTILE_BLOCKER_LAYER := 6
+const STRUCTURE_LAYER := 4
 
 var tiles: Array[Array] = []
 var _collision_root: Node2D
@@ -98,6 +99,7 @@ func _build_collision() -> void:
 	_collision_root = Node2D.new()
 	_collision_root.name = "TileCollisions"
 	add_child(_collision_root)
+	_add_map_boundaries()
 
 	for y in range(rows):
 		for x in range(columns):
@@ -105,6 +107,27 @@ func _build_collision() -> void:
 			if is_traversable(tile_type):
 				continue
 			_add_blocking_tile(Vector2i(x, y), tile_type)
+
+func _add_map_boundaries() -> void:
+	var bounds := Rect2(map_origin, Vector2(columns, rows) * tile_size)
+	var wall_thickness := tile_size
+	_add_boundary("MapBoundaryLeft", Vector2(bounds.position.x - wall_thickness * 0.5, bounds.position.y + bounds.size.y * 0.5), Vector2(wall_thickness, bounds.size.y + wall_thickness * 2.0))
+	_add_boundary("MapBoundaryRight", Vector2(bounds.end.x + wall_thickness * 0.5, bounds.position.y + bounds.size.y * 0.5), Vector2(wall_thickness, bounds.size.y + wall_thickness * 2.0))
+	_add_boundary("MapBoundaryTop", Vector2(bounds.position.x + bounds.size.x * 0.5, bounds.position.y - wall_thickness * 0.5), Vector2(bounds.size.x, wall_thickness))
+	_add_boundary("MapBoundaryBottom", Vector2(bounds.position.x + bounds.size.x * 0.5, bounds.end.y + wall_thickness * 0.5), Vector2(bounds.size.x, wall_thickness))
+
+func _add_boundary(boundary_name: String, boundary_position: Vector2, boundary_size: Vector2) -> void:
+	var body := StaticBody2D.new()
+	body.name = boundary_name
+	body.collision_layer = 1 # World
+	body.collision_mask = 0
+	body.position = boundary_position
+	var shape := CollisionShape2D.new()
+	var rectangle := RectangleShape2D.new()
+	rectangle.size = boundary_size
+	shape.shape = rectangle
+	body.add_child(shape)
+	_collision_root.add_child(body)
 
 func _add_blocking_tile(cell: Vector2i, tile_type: int) -> void:
 	var body := StaticBody2D.new()
@@ -138,15 +161,21 @@ func cell_to_world(cell: Vector2i) -> Vector2:
 func world_to_cell(world_position: Vector2) -> Vector2i:
 	return Vector2i(floori((world_position.x - map_origin.x) / tile_size), floori((world_position.y - map_origin.y) / tile_size))
 
+func clamp_entity_position(world_position: Vector2, clearance: float) -> Vector2:
+	var map_size := Vector2(columns, rows) * tile_size
+	var minimum := map_origin + Vector2.ONE * clearance
+	var maximum := map_origin + map_size - Vector2.ONE * clearance
+	return Vector2(clampf(world_position.x, minimum.x, maximum.x), clampf(world_position.y, minimum.y, maximum.y))
+
 func find_path(from_world: Vector2, to_world: Vector2, clearance: float = 12.0) -> Array[Vector2]:
 	var start_cell := world_to_cell(from_world)
 	var goal_cell := world_to_cell(to_world)
 	var path: Array[Vector2] = []
 
-	if not is_inside(start_cell) or not is_inside(goal_cell):
+	if not is_inside(start_cell):
 		return path
 	var goal_position := to_world
-	if not is_traversable(get_tile(goal_cell)):
+	if not is_inside(goal_cell) or not is_traversable(get_tile(goal_cell)):
 		var fallback_goal := _find_closest_reachable_goal(start_cell, to_world, clearance)
 		if fallback_goal.is_empty():
 			return path
@@ -155,7 +184,14 @@ func find_path(from_world: Vector2, to_world: Vector2, clearance: float = 12.0) 
 
 	var cell_path := _navigation_grid.get_id_path(start_cell, goal_cell)
 	if cell_path.is_empty():
-		return path
+		var fallback_goal := _find_closest_reachable_goal(start_cell, to_world, clearance)
+		if fallback_goal.is_empty():
+			return path
+		goal_cell = fallback_goal["cell"]
+		goal_position = fallback_goal["position"]
+		cell_path = _navigation_grid.get_id_path(start_cell, goal_cell)
+		if cell_path.is_empty():
+			return path
 
 	var route_points: Array[Vector2] = []
 	for index in range(1, cell_path.size()):
@@ -193,7 +229,9 @@ func find_path(from_world: Vector2, to_world: Vector2, clearance: float = 12.0) 
 				path.append(corner)
 			anchor = corner
 
-	if _line_is_clear(anchor, goal_position):
+	if route_points.is_empty():
+		path.append(goal_position)
+	elif _line_is_clear(anchor, goal_position):
 		path.append(goal_position)
 	else:
 		path.append(route_points[route_points.size() - 1])
@@ -251,16 +289,17 @@ func _line_is_clear(from_world: Vector2, to_world: Vector2) -> bool:
 			return false
 	return true
 
-func has_line_of_sight(from_world: Vector2, to_world: Vector2, projectile_radius: float = 6.0) -> bool:
+func has_line_of_sight(from_world: Vector2, to_world: Vector2, projectile_radius: float = 6.0, exclude: Array[RID] = []) -> bool:
 	var distance := from_world.distance_to(to_world)
 	var steps := maxi(1, ceili(distance / 4.0))
-	var blocker_mask := 1 << (PROJECTILE_BLOCKER_LAYER - 1)
+	var blocker_mask := (1 << (PROJECTILE_BLOCKER_LAYER - 1)) | (1 << (STRUCTURE_LAYER - 1))
 	var shape := CircleShape2D.new()
 	shape.radius = projectile_radius
 	var query := PhysicsShapeQueryParameters2D.new()
 	query.shape = shape
 	query.collision_mask = blocker_mask
 	query.collide_with_bodies = true
+	query.exclude = exclude
 
 	# Sample a projectile-sized circle along the segment. A zero-width ray can
 	# miss a tile corner even though the actual projectile would collide with it.
@@ -271,7 +310,7 @@ func has_line_of_sight(from_world: Vector2, to_world: Vector2, projectile_radius
 			return false
 	return true
 
-func find_closest_line_of_sight_position(from_world: Vector2, to_world: Vector2, max_distance: float, clearance: float = 12.0) -> Dictionary:
+func find_closest_line_of_sight_position(from_world: Vector2, to_world: Vector2, max_distance: float, clearance: float = 12.0, exclude: Array[RID] = []) -> Dictionary:
 	var start_cell := world_to_cell(from_world)
 	var closest_position := Vector2.ZERO
 	var closest_distance := INF
@@ -289,7 +328,7 @@ func find_closest_line_of_sight_position(from_world: Vector2, to_world: Vector2,
 			var candidate := cell_to_world(cell) + Vector2.ONE * tile_size * 0.5
 			if candidate.distance_to(to_world) > max_distance:
 				continue
-			if not has_line_of_sight(candidate, to_world):
+			if not has_line_of_sight(candidate, to_world, 6.0, exclude):
 				continue
 			if _navigation_grid.get_id_path(start_cell, cell).is_empty():
 				continue

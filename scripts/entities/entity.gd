@@ -7,9 +7,24 @@ var _components: Array[EntityComponent] = []
 var is_selected := false
 var facing_direction := Vector2.UP
 @export_range(0.0, 1440.0, 1.0) var turning_rate_degrees_per_second := 720.0
+@export_range(0.0, 64.0, 0.5) var collision_radius := 12.0
+@export_range(0.0, 8.0, 0.1) var collision_leeway := 2.0
+@export_range(0.0, 4.0, 0.05) var teammate_push_strength := 1.0
+@export_range(0.0, 1.0, 0.05) var teammate_slide_strength := 0.35
+@export var grounded := false
+@export_range(0.0, 50.0, 0.1) var health_regen_per_second := 1.0
+
+var _last_teammate_push_frame := -1
+var _last_teammate_push_entity_id := -1
+var _formation_collision_ignored: Array[Entity] = []
 
 func _ready() -> void:
 	add_to_group("entities")
+	if grounded:
+		# Structures are solid to units and are also projectile/LOS blockers.
+		collision_layer |= 1 << 3 # Structures (layer 4)
+		collision_layer |= 1 << 5 # Projectile blockers (layer 6)
+		add_to_group("buildings")
 	# Keep world-order indicators and other ground effects beneath entities.
 	z_index = 1
 	for child in get_children():
@@ -65,3 +80,146 @@ func turn_towards(direction: Vector2, delta: float) -> void:
 	var next_angle := rotate_toward(current_angle, target_angle, turn_amount)
 	facing_direction = Vector2.RIGHT.rotated(next_angle)
 	queue_redraw()
+
+## Gives a moving unit a little room to move through non-held teammates.
+## CharacterBody2D collision still prevents enemies and held units from being
+## walked through; this small pre-push makes friendly formations feel soft
+## instead of making every unit behave like an immovable crate.
+func push_teammates(direction: Vector2, distance: float) -> void:
+	if direction.length_squared() <= 0.0 or distance <= 0.0:
+		return
+
+	var own_team := get_component(TeamComponent) as TeamComponent
+	if own_team == null:
+		return
+	var desired_direction := direction.normalized()
+	for candidate in get_tree().get_nodes_in_group("entities"):
+		if candidate == self or not candidate is Entity:
+			continue
+		var other := candidate as Entity
+		var other_team := other.get_component(TeamComponent) as TeamComponent
+		if other_team == null or other_team.team != own_team.team or other.grounded or other.is_hold_position() or is_formation_collision_ignored(other):
+			continue
+
+		var offset := other.global_position - global_position
+		var distance_between := offset.length()
+		var combined_radius := collision_radius + other.collision_radius
+		if distance_between > combined_radius + collision_leeway + distance:
+			continue
+		var to_other_direction := offset.normalized()
+		if distance_between <= 0.001:
+			to_other_direction = desired_direction
+		if desired_direction.dot(to_other_direction) < 0.15:
+			continue
+
+		var other_movement := other.get_component(MovementComponent) as MovementComponent
+		var other_is_moving := other_movement != null and other_movement.is_moving()
+		var physics_frame := Engine.get_physics_frames()
+		if _last_teammate_push_frame == physics_frame and _last_teammate_push_entity_id == other.get_instance_id():
+			continue
+		# Lock the pair in both directions for this physics frame. Without this,
+		# the second unit can immediately resolve the same contact in reverse and
+		# make both bodies appear magnetically stuck together.
+		_last_teammate_push_frame = physics_frame
+		_last_teammate_push_entity_id = other.get_instance_id()
+		other._last_teammate_push_frame = physics_frame
+		other._last_teammate_push_entity_id = get_instance_id()
+
+		# Test both sides of the mover's travel axis and choose the one with
+		# fewer blockers. The instance-id tie-break is only a final fallback,
+		# preventing a left/right bias when both sides are genuinely equal.
+		var slide_direction := _choose_slide_direction(other, desired_direction, to_other_direction, distance * teammate_slide_strength)
+
+		# Moving teammates get only a tiny separation nudge, while stationary
+		# teammates can slide farther so the mover can actually pass around them.
+		var slide_scale := 0.12 if other_is_moving else 1.0
+		var push_distance := minf(distance * teammate_push_strength * teammate_slide_strength * slide_scale, distance + collision_leeway)
+		# Deliberately apply no radial correction here. The displacement is
+		# strictly perpendicular to the mover's travel direction; CharacterBody2D
+		# collision resolves the final body separation without nudging the target
+		# into or around the mover.
+		other.global_position += slide_direction * push_distance
+		var maps := get_tree().get_nodes_in_group("terrain_maps")
+		if not maps.is_empty():
+			other.global_position = (maps[0] as TerrainMap).clamp_entity_position(other.global_position, other.collision_radius)
+
+func _choose_slide_direction(other: Entity, desired_direction: Vector2, to_other_direction: Vector2, test_distance: float) -> Vector2:
+	var side := desired_direction.orthogonal().normalized()
+	var positive_outward := side.dot(to_other_direction)
+	var negative_outward := (-side).dot(to_other_direction)
+	# Never select a side that moves the shoved unit toward the mover when
+	# there is a clearly outward perpendicular option.
+	if positive_outward > 0.05 and negative_outward <= 0.05:
+		return side
+	if negative_outward > 0.05 and positive_outward <= 0.05:
+		return -side
+
+	var positive_blockers := _count_slide_blockers(other, side * test_distance)
+	var negative_blockers := _count_slide_blockers(other, -side * test_distance)
+	if positive_blockers < negative_blockers:
+		return side
+	if negative_blockers < positive_blockers:
+		return -side
+
+	var other_movement := other.get_component(MovementComponent) as MovementComponent
+	if other_movement != null and other_movement.move_direction.length_squared() > 0.0:
+		var movement_side := other_movement.move_direction.normalized().dot(side)
+		if absf(movement_side) > 0.15:
+			return side if movement_side > 0.0 else -side
+	return side if get_instance_id() < other.get_instance_id() else -side
+
+func _count_slide_blockers(other: Entity, offset: Vector2) -> int:
+	var shape := CircleShape2D.new()
+	shape.radius = other.collision_radius
+	var query := PhysicsShapeQueryParameters2D.new()
+	query.shape = shape
+	query.transform = Transform2D(0.0, other.global_position + offset)
+	query.collision_mask = other.collision_mask
+	query.collide_with_bodies = true
+	query.exclude = [other.get_rid(), get_rid()]
+	return get_world_2d().direct_space_state.intersect_shape(query, 8).size()
+
+func is_teammate(other: Entity) -> bool:
+	if other == null:
+		return false
+	var own_team := get_component(TeamComponent) as TeamComponent
+	var other_team := other.get_component(TeamComponent) as TeamComponent
+	return own_team != null and other_team != null and own_team.team == other_team.team
+
+func set_formation_collision_ignored(other: Entity, ignored: bool) -> void:
+	if other == null or other == self:
+		return
+	if ignored:
+		if not _formation_collision_ignored.has(other):
+			_formation_collision_ignored.append(other)
+		add_collision_exception_with(other)
+	else:
+		_formation_collision_ignored.erase(other)
+		remove_collision_exception_with(other)
+
+func is_formation_collision_ignored(other: Entity) -> bool:
+	return _formation_collision_ignored.has(other)
+
+func separate_from_teammate(other: Entity) -> void:
+	if other == null or not is_instance_valid(other):
+		return
+	var offset := other.global_position - global_position
+	var distance := offset.length()
+	var combined_radius := collision_radius + other.collision_radius
+	if distance >= combined_radius:
+		return
+	var normal := offset.normalized()
+	if distance <= 0.001:
+		normal = Vector2.RIGHT if get_instance_id() < other.get_instance_id() else Vector2.LEFT
+	var correction := maxf((combined_radius - distance) * 0.5 + 0.1, 0.1)
+	global_position -= normal * correction
+	other.global_position += normal * correction
+	var maps := get_tree().get_nodes_in_group("terrain_maps")
+	if not maps.is_empty():
+		var terrain_map := maps[0] as TerrainMap
+		global_position = terrain_map.clamp_entity_position(global_position, collision_radius)
+		other.global_position = terrain_map.clamp_entity_position(other.global_position, other.collision_radius)
+
+func is_hold_position() -> bool:
+	var combat := get_component(CombatComponent) as CombatComponent
+	return combat != null and combat.auto_target_mode == CombatComponent.AUTO_HOLD_POSITION

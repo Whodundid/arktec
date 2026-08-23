@@ -36,7 +36,7 @@ func spawn_enemy() -> Entity:
 	enemy.set("display_name", "Stalker")
 	enemy.set("body_color", Color("c94f59"))
 	enemy.collision_layer = 4
-	enemy.collision_mask = 1
+	enemy.collision_mask = 15
 	var team := enemy.get_component(TeamComponent) as TeamComponent
 	team.team = TeamComponent.Team.ENEMY
 	var health := enemy.get_component(HealthComponent) as HealthComponent

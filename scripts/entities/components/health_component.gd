@@ -32,7 +32,7 @@ func damage(amount: float) -> void:
 			entity.queue_free()
 
 func heal(amount: float) -> void:
-	if amount <= 0.0 or current_health <= 0.0:
+	if amount <= 0.0 or current_health <= 0.0 or current_health >= maximum_health:
 		return
 	current_health = minf(current_health + amount, maximum_health)
 	health_changed.emit(current_health, maximum_health)
