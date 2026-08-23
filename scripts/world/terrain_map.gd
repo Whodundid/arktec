@@ -35,6 +35,17 @@ const TILE_NAMES := {
 	TileType.WATER: "Water",
 }
 
+# Projectile visibility is separate from movement. A tile can be impassable
+# without becoming a line-of-sight blocker (water is the first example).
+const TILE_BLOCKS_PROJECTILES := {
+	TileType.GRASS: false,
+	TileType.STONE: true,
+	TileType.DIRT: false,
+	TileType.WATER: false,
+}
+
+const PROJECTILE_BLOCKER_LAYER := 6
+
 var tiles: Array[Array] = []
 var _collision_root: Node2D
 var _navigation_grid := AStarGrid2D.new()
@@ -99,6 +110,8 @@ func _add_blocking_tile(cell: Vector2i, tile_type: int) -> void:
 	var body := StaticBody2D.new()
 	body.name = "%s_%d_%d" % [tile_name(tile_type), cell.x, cell.y]
 	body.collision_layer = 1 # World
+	if blocks_projectiles(tile_type):
+		body.collision_layer |= 1 << (PROJECTILE_BLOCKER_LAYER - 1)
 	body.collision_mask = 0
 	body.position = cell_to_world(cell) + Vector2.ONE * tile_size * 0.5
 
@@ -238,6 +251,58 @@ func _line_is_clear(from_world: Vector2, to_world: Vector2) -> bool:
 			return false
 	return true
 
+func has_line_of_sight(from_world: Vector2, to_world: Vector2, projectile_radius: float = 6.0) -> bool:
+	var distance := from_world.distance_to(to_world)
+	var steps := maxi(1, ceili(distance / 4.0))
+	var blocker_mask := 1 << (PROJECTILE_BLOCKER_LAYER - 1)
+	var shape := CircleShape2D.new()
+	shape.radius = projectile_radius
+	var query := PhysicsShapeQueryParameters2D.new()
+	query.shape = shape
+	query.collision_mask = blocker_mask
+	query.collide_with_bodies = true
+
+	# Sample a projectile-sized circle along the segment. A zero-width ray can
+	# miss a tile corner even though the actual projectile would collide with it.
+	for index in range(steps + 1):
+		var sample := from_world.lerp(to_world, float(index) / float(steps))
+		query.transform = Transform2D(0.0, sample)
+		if not get_world_2d().direct_space_state.intersect_shape(query, 1).is_empty():
+			return false
+	return true
+
+func find_closest_line_of_sight_position(from_world: Vector2, to_world: Vector2, max_distance: float, clearance: float = 12.0) -> Dictionary:
+	var start_cell := world_to_cell(from_world)
+	var closest_position := Vector2.ZERO
+	var closest_distance := INF
+
+	if not is_inside(start_cell):
+		return {}
+
+	# The map is intentionally small, so checking every traversable cell keeps
+	# this predictable and makes the closest reachable firing position explicit.
+	for y in range(rows):
+		for x in range(columns):
+			var cell := Vector2i(x, y)
+			if not is_traversable(get_tile(cell)):
+				continue
+			var candidate := cell_to_world(cell) + Vector2.ONE * tile_size * 0.5
+			if candidate.distance_to(to_world) > max_distance:
+				continue
+			if not has_line_of_sight(candidate, to_world):
+				continue
+			if _navigation_grid.get_id_path(start_cell, cell).is_empty():
+				continue
+			var path_distance := from_world.distance_squared_to(candidate)
+			if path_distance >= closest_distance:
+				continue
+			closest_distance = path_distance
+			closest_position = _closest_point_in_cell(candidate, cell, clearance)
+
+	if closest_distance == INF:
+		return {}
+	return {"position": closest_position}
+
 func is_inside(cell: Vector2i) -> bool:
 	return cell.x >= 0 and cell.x < columns and cell.y >= 0 and cell.y < rows
 
@@ -248,6 +313,9 @@ func get_tile(cell: Vector2i) -> int:
 
 func is_traversable(tile_type: int) -> bool:
 	return tile_type == TileType.GRASS or tile_type == TileType.DIRT
+
+func blocks_projectiles(tile_type: int) -> bool:
+	return TILE_BLOCKS_PROJECTILES.get(tile_type, false)
 
 func tile_color(tile_type: int) -> Color:
 	return TILE_COLORS.get(tile_type, Color.MAGENTA)

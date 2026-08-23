@@ -1,10 +1,11 @@
+class_name RTSCamera
 extends Camera2D
 
 ## Lightweight 90s-style RTS camera.
 ## The camera is intentionally independent from the player. It can later
 ## become the commander's view while selected mercenaries act in the world.
 
-@export var pan_speed := 520.0
+@export var pan_speed := 760.0
 @export var edge_size := 24.0
 @export var zoom_step := 0.1
 @export var min_zoom := 0.65
@@ -14,6 +15,7 @@ extends Camera2D
 var _dragging := false
 
 func _ready() -> void:
+	add_to_group("rts_cameras")
 
 	position_smoothing_enabled = true
 	position_smoothing_speed = 8.0

@@ -9,6 +9,8 @@ extends EntityComponent
 
 var move_direction := Vector2.ZERO
 var target_position: Variant = null
+var destination_position: Variant = null
+var destination_marker_remaining := 0.0
 var _path: Array[Vector2] = []
 var _path_index := 0
 
@@ -18,6 +20,7 @@ var _path_index := 0
 func _physics_process(_delta: float) -> void:
 	if entity == null:
 		return
+	destination_marker_remaining = maxf(destination_marker_remaining - _delta, 0.0)
 
 	if not _path.is_empty():
 		_follow_path()
@@ -37,9 +40,12 @@ func _physics_process(_delta: float) -> void:
 func set_move_direction(direction: Vector2) -> void:
 	_clear_path()
 	target_position = null
+	destination_position = null
+	destination_marker_remaining = 0.0
 	move_direction = direction
 
 func move_to(destination: Vector2) -> void:
+	destination_position = destination
 	var terrain_map := _find_terrain_map()
 	if terrain_map != null:
 		var path := terrain_map.find_path(entity.global_position, destination, path_clearance)
@@ -48,21 +54,37 @@ func move_to(destination: Vector2) -> void:
 			return
 		_path = path
 		_path_index = 0
+		destination_position = path.back()
+		destination_marker_remaining = 0.5
 		target_position = null
 		move_direction = Vector2.ZERO
 		return
 
 	_clear_path()
 	target_position = destination
+	destination_marker_remaining = 0.5
 
 func clear_target() -> void:
 	_clear_path()
 	target_position = null
+	destination_position = null
+	destination_marker_remaining = 0.0
 
 func stop() -> void:
 	_clear_path()
 	target_position = null
+	destination_position = null
+	destination_marker_remaining = 0.0
 	move_direction = Vector2.ZERO
+
+func is_moving() -> bool:
+	return not _path.is_empty() or target_position != null or move_direction.length_squared() > 0.0
+
+func get_destination_position() -> Variant:
+	return destination_position
+
+func get_destination_marker_alpha() -> float:
+	return clampf(destination_marker_remaining / 0.5, 0.0, 1.0)
 
 func _follow_path() -> void:
 	if _path_index >= _path.size():

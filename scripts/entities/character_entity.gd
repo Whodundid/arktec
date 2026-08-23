@@ -13,8 +13,7 @@ func _ready() -> void:
 
 func _draw() -> void:
 	# Shadow, body, facing marker, and a tiny nameplate are enough for now.
-	if is_selected:
-		draw_arc(Vector2.ZERO, 20.0, 0.0, TAU, 32, Color("f4d58b"), 3.0)
+	draw_selection_ring(20.0, 3.0)
 	draw_filled_ellipse(Vector2(0, 10), Vector2(14, 6), Color(0.0, 0.0, 0.0, 0.35))
 	draw_circle(Vector2.ZERO, 12.0, body_color)
 	draw_circle(Vector2.ZERO, 12.0, Color("f4d58b"), false, 2.0)

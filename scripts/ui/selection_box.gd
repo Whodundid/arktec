@@ -43,26 +43,28 @@ func _draw() -> void:
 
 func _select_entities_in_box() -> void:
 	var selection_rect := _screen_rect(_drag_start, _drag_current)
-	_clear_selection()
+	var selected_any := false
 
 	for selectable in get_tree().get_nodes_in_group("mouse_controlled_entities"):
-		if not selectable is MouseControlComponent or not selectable.can_be_controlled():
+		if not selectable is MouseControlComponent or not selectable.can_be_selected():
 			continue
 		var entity := selectable.entity as Entity
 		if entity == null:
 			continue
 		var screen_position := get_viewport().get_canvas_transform() * entity.global_position
 		if selection_rect.has_point(screen_position):
+			if not selected_any:
+				_clear_selection()
+				selected_any = true
 			selectable.set_selected(true)
 
 func _select_entity_at(screen_position: Vector2) -> void:
-	_clear_selection()
 	var mouse_world_position := get_viewport().get_canvas_transform().affine_inverse() * screen_position
 	var closest: MouseControlComponent = null
 	var closest_distance := INF
 
 	for selectable in get_tree().get_nodes_in_group("mouse_controlled_entities"):
-		if not selectable is MouseControlComponent or not selectable.can_be_controlled():
+		if not selectable is MouseControlComponent or not selectable.can_be_selected():
 			continue
 		var entity := selectable.entity as Entity
 		if entity == null:
@@ -73,6 +75,7 @@ func _select_entity_at(screen_position: Vector2) -> void:
 			closest_distance = distance
 
 	if closest != null:
+		_clear_selection()
 		closest.set_selected(true)
 		get_viewport().set_input_as_handled()
 

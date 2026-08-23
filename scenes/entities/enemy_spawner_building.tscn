@@ -1,0 +1,31 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/entities/enemy_spawner_building.gd" id="1_building"]
+[ext_resource type="Script" path="res://scripts/entities/components/health_component.gd" id="2_health"]
+[ext_resource type="Script" path="res://scripts/entities/components/team_component.gd" id="3_team"]
+[ext_resource type="PackedScene" path="res://scenes/entities/character_entity.tscn" id="4_enemy"]
+[ext_resource type="Script" path="res://scripts/entities/components/mouse_control_component.gd" id="5_mouse_control"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_building"]
+size = Vector2(60, 48)
+
+[node name="EnemySpawnerBuilding" type="CharacterBody2D"]
+script = ExtResource("1_building")
+collision_layer = 4
+collision_mask = 0
+enemy_scene = ExtResource("4_enemy")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_building")
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("2_health")
+maximum_health = 250.0
+
+[node name="TeamComponent" type="Node" parent="."]
+script = ExtResource("3_team")
+team = 1
+
+[node name="MouseControlComponent" type="Node" parent="."]
+script = ExtResource("5_mouse_control")
+selection_radius = 40.0
