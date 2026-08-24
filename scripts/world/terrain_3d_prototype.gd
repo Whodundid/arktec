@@ -22,6 +22,7 @@ enum TileType {
 @export var camera_size := 18.0
 
 const TILE_SHEET_PATH := "res://assets/art/SPRITE_SHEET_1.png"
+const SIGNPOST_UNIT_SCENE := preload("res://scenes/entities/signpost_unit_3d.tscn")
 const TILE_SHEET_CELL_SIZE := 32.0
 const FALLBACK_SHEET_SIZE := Vector2(320.0, 320.0)
 
@@ -43,8 +44,12 @@ var _tiles: Array[Array] = []
 var _tile_sheet: Texture2D
 var _camera: Camera3D
 var _camera_yaw := 0.0
+var _camera_target := Vector3(0.0, 0.25, 0.0)
 var _dragging_camera := false
 var _status_label: Label
+var _interaction_status := "Click the signpost to select it"
+var _navigation_grid := AStarGrid2D.new()
+var _unit: SignpostUnit3D
 
 func _ready() -> void:
 	if ResourceLoader.exists(TILE_SHEET_PATH):
@@ -53,8 +58,24 @@ func _ready() -> void:
 	_build_environment()
 	_build_test_map()
 	_build_block_world()
+	_build_navigation_grid()
+	_build_terrain_collision()
 	_build_camera()
+	_build_signpost_unit()
 	_build_overlay()
+	_update_camera()
+
+func _process(delta: float) -> void:
+	var input_direction := Input.get_vector("camera_left", "camera_right", "camera_up", "camera_down")
+	if input_direction == Vector2.ZERO:
+		return
+
+	var camera_outward := Vector3(cos(_camera_yaw), 0.0, sin(_camera_yaw))
+	var camera_right := Vector3(-camera_outward.z, 0.0, camera_outward.x)
+	var movement := camera_right * input_direction.x + camera_outward * input_direction.y
+	_camera_target += movement.normalized() * 8.0 * delta
+	_camera_target.x = clampf(_camera_target.x, -float(columns) * 0.5, float(columns) * 0.5)
+	_camera_target.z = clampf(_camera_target.z, -float(rows) * 0.5, float(rows) * 0.5)
 	_update_camera()
 
 func _build_environment() -> void:
@@ -127,6 +148,61 @@ func _build_block_world() -> void:
 
 	for tile_type: int in cells_by_type:
 		_create_tile_multimesh(tile_type, cells_by_type[tile_type])
+
+func _build_navigation_grid() -> void:
+	_navigation_grid.region = Rect2i(0, 0, columns, rows)
+	_navigation_grid.cell_size = Vector2.ONE
+	_navigation_grid.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
+	_navigation_grid.update()
+
+	for y in range(rows):
+		for x in range(columns):
+			var cell := Vector2i(x, y)
+			_navigation_grid.set_point_solid(cell, not _is_traversable(_tiles[y][x]))
+
+func _build_terrain_collision() -> void:
+	var terrain_body := StaticBody3D.new()
+	terrain_body.name = "TerrainCollision"
+	add_child(terrain_body)
+
+	# One broad floor collider supports the walkable terrain. Stone and water
+	# receive additional cell colliders so later CharacterBody3D units cannot
+	# walk through geometry that the navigation grid considers blocked.
+	_add_box_collision(
+		terrain_body,
+		"TerrainFloor",
+		Vector3(float(columns), 0.34, float(rows)),
+		Vector3(0.0, 0.17, 0.0)
+	)
+
+	for y in range(rows):
+		for x in range(columns):
+			var cell := Vector2i(x, y)
+			var tile_type: int = _tiles[y][x]
+			if tile_type == TileType.STONE:
+				var stone_height := _tile_height(tile_type, cell)
+				_add_box_collision(
+					terrain_body,
+					"Stone_%d_%d" % [x, y],
+					Vector3(1.0, stone_height, 1.0),
+					_cell_to_world(cell, stone_height * 0.5)
+				)
+			elif tile_type == TileType.WATER:
+				_add_box_collision(
+					terrain_body,
+					"Water_%d_%d" % [x, y],
+					Vector3(1.0, 0.48, 1.0),
+					_cell_to_world(cell, 0.24)
+				)
+
+func _add_box_collision(parent: StaticBody3D, shape_name: String, size: Vector3, position: Vector3) -> void:
+	var collision := CollisionShape3D.new()
+	collision.name = shape_name
+	var box := BoxShape3D.new()
+	box.size = size
+	collision.shape = box
+	collision.position = position
+	parent.add_child(collision)
 
 func _create_tile_multimesh(tile_type: int, cells: Array) -> void:
 	if cells.is_empty():
@@ -267,18 +343,27 @@ func _build_camera() -> void:
 	_camera.current = true
 	add_child(_camera)
 
+func _build_signpost_unit() -> void:
+	_unit = SIGNPOST_UNIT_SCENE.instantiate() as SignpostUnit3D
+	_unit.name = "MercenarySignpost"
+	add_child(_unit)
+	var spawn_cell := Vector2i(4, 10)
+	_unit.position = _cell_to_world_top(spawn_cell)
+
 func _update_camera() -> void:
 	if _camera == null:
 		return
-	var target := Vector3(0.0, 0.25, 0.0)
-	_camera.position = target + Vector3(
+	_camera.position = _camera_target + Vector3(
 		cos(_camera_yaw) * camera_distance,
 		camera_height,
 		sin(_camera_yaw) * camera_distance
 	)
-	_camera.look_at(target, Vector3.UP)
+	_camera.look_at(_camera_target, Vector3.UP)
+	_refresh_status()
+
+func _refresh_status() -> void:
 	if _status_label != null:
-		_status_label.text = "3D BLOCK TERRAIN PROTOTYPE\nQ / E or middle-drag: rotate    Wheel: zoom    R: reset\nCamera angle: %d degrees    Stone height: deterministic 0.68-1.40" % roundi(rad_to_deg(_camera_yaw))
+		_status_label.text = "3D BLOCK TERRAIN PROTOTYPE\nWASD/arrows: pan    Q/E or middle-drag: rotate    Wheel: zoom    R: reset\nLeft-click: select/move    Camera: %d degrees    %s" % [roundi(rad_to_deg(_camera_yaw)), _interaction_status]
 
 func _build_overlay() -> void:
 	var canvas := CanvasLayer.new()
@@ -294,6 +379,49 @@ func _build_overlay() -> void:
 	_status_label.add_theme_font_size_override("font_size", 16)
 	panel.add_child(_status_label)
 
+func _handle_left_click(screen_position: Vector2) -> void:
+	if _unit == null or _camera == null:
+		return
+
+	var unit_screen_position := _camera.unproject_position(_unit.global_position + Vector3(0.0, 0.78, 0.0))
+	if unit_screen_position.distance_to(screen_position) <= 42.0:
+		_unit.set_selected(true)
+		_interaction_status = "%s selected" % _unit.display_name
+		_refresh_status()
+		return
+
+	if not _unit.selected:
+		_interaction_status = "Select the signpost before issuing a move"
+		_refresh_status()
+		return
+
+	var ray_origin := _camera.project_ray_origin(screen_position)
+	var ray_direction := _camera.project_ray_normal(screen_position)
+	var ground_plane := Plane(Vector3.UP, 0.0)
+	var intersection = ground_plane.intersects_ray(ray_origin, ray_direction)
+	if intersection == null:
+		return
+
+	var goal_cell := _world_to_cell(intersection)
+	if not _is_inside(goal_cell) or not _is_traversable(_tiles[goal_cell.y][goal_cell.x]):
+		_interaction_status = "That block is not traversable"
+		_refresh_status()
+		return
+
+	var start_cell := _world_to_cell(_unit.global_position)
+	var cell_path := _navigation_grid.get_id_path(start_cell, goal_cell)
+	if cell_path.is_empty():
+		_interaction_status = "No route to that block"
+		_refresh_status()
+		return
+
+	var world_path: Array[Vector3] = []
+	for index in range(1, cell_path.size()):
+		world_path.append(_cell_to_world_top(Vector2i(cell_path[index])))
+	_unit.set_path(world_path)
+	_interaction_status = "Moving %s to (%d, %d)" % [_unit.display_name, goal_cell.x, goal_cell.y]
+	_refresh_status()
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.physical_keycode:
@@ -307,11 +435,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 			KEY_R:
 				_camera_yaw = deg_to_rad(camera_yaw_degrees)
+				_camera_target = Vector3(0.0, 0.25, 0.0)
 				_camera.size = camera_size
 				_update_camera()
 				get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_MIDDLE:
+		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			_handle_left_click(event.position)
+			get_viewport().set_input_as_handled()
+		elif event.button_index == MOUSE_BUTTON_MIDDLE:
 			_dragging_camera = event.pressed
 			get_viewport().set_input_as_handled()
 		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP:
@@ -324,6 +456,29 @@ func _unhandled_input(event: InputEvent) -> void:
 		_camera_yaw += event.relative.x * 0.01
 		_update_camera()
 		get_viewport().set_input_as_handled()
+
+func _cell_to_world(cell: Vector2i, y_position: float = 0.0) -> Vector3:
+	return Vector3(
+		float(cell.x) - float(columns) * 0.5 + 0.5,
+		y_position,
+		float(cell.y) - float(rows) * 0.5 + 0.5
+	)
+
+func _cell_to_world_top(cell: Vector2i) -> Vector3:
+	var tile_type: int = _tiles[cell.y][cell.x]
+	return _cell_to_world(cell, _tile_height(tile_type, cell) + 0.02)
+
+func _world_to_cell(world_position: Vector3) -> Vector2i:
+	return Vector2i(
+		floori(world_position.x + float(columns) * 0.5),
+		floori(world_position.z + float(rows) * 0.5)
+	)
+
+func _is_inside(cell: Vector2i) -> bool:
+	return cell.x >= 0 and cell.x < columns and cell.y >= 0 and cell.y < rows
+
+func _is_traversable(tile_type: int) -> bool:
+	return tile_type == TileType.GRASS or tile_type == TileType.DIRT
 
 func _set_tile(cell: Vector2i, tile_type: int) -> void:
 	if cell.x >= 0 and cell.x < columns and cell.y >= 0 and cell.y < rows:
