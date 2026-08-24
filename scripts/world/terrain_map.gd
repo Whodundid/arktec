@@ -21,6 +21,9 @@ enum TileType {
 @export var map_origin := Vector2(-896.0, -512.0)
 ## Optional debug overlay; keep the shipped terrain free of cell outlines.
 @export var draw_grid := false
+@export var dynamic_path_avoidance := true
+@export_range(1.0, 20.0, 0.5) var dynamic_path_penalty := 5.0
+@export_range(0, 2, 1) var dynamic_path_reservation_radius := 1
 ## Kept as a compatibility/debug toggle for the pause menu. When disabled,
 ## terrain renders as flat colors instead of atlas textures.
 @export var draw_tile_details := true
@@ -275,17 +278,20 @@ func clamp_entity_position(world_position: Vector2, clearance: float) -> Vector2
 	var maximum := map_origin + map_size - Vector2.ONE * clearance
 	return Vector2(clampf(world_position.x, minimum.x, maximum.x), clampf(world_position.y, minimum.y, maximum.y))
 
-func find_path(from_world: Vector2, to_world: Vector2, clearance: float = 12.0) -> Array[Vector2]:
+func find_path(from_world: Vector2, to_world: Vector2, clearance: float = 12.0, requester: Entity = null) -> Array[Vector2]:
 	var start_cell := world_to_cell(from_world)
 	var goal_cell := world_to_cell(to_world)
 	var path: Array[Vector2] = []
+	var reserved_cells := _apply_dynamic_path_penalties(requester)
 
 	if not is_inside(start_cell):
+		_clear_dynamic_path_penalties(reserved_cells)
 		return path
 	var goal_position := to_world
 	if not is_inside(goal_cell) or not is_traversable(get_tile(goal_cell)):
 		var fallback_goal := _find_closest_reachable_goal(start_cell, to_world, clearance)
 		if fallback_goal.is_empty():
+			_clear_dynamic_path_penalties(reserved_cells)
 			return path
 		goal_cell = fallback_goal["cell"]
 		goal_position = fallback_goal["position"]
@@ -294,11 +300,13 @@ func find_path(from_world: Vector2, to_world: Vector2, clearance: float = 12.0) 
 	if cell_path.is_empty():
 		var fallback_goal := _find_closest_reachable_goal(start_cell, to_world, clearance)
 		if fallback_goal.is_empty():
+			_clear_dynamic_path_penalties(reserved_cells)
 			return path
 		goal_cell = fallback_goal["cell"]
 		goal_position = fallback_goal["position"]
 		cell_path = _navigation_grid.get_id_path(start_cell, goal_cell)
 		if cell_path.is_empty():
+			_clear_dynamic_path_penalties(reserved_cells)
 			return path
 
 	var route_points: Array[Vector2] = []
@@ -345,7 +353,41 @@ func find_path(from_world: Vector2, to_world: Vector2, clearance: float = 12.0) 
 		path.append(route_points[route_points.size() - 1])
 		if path.back().distance_to(goal_position) > 1.0:
 			path.append(goal_position)
+	_clear_dynamic_path_penalties(reserved_cells)
 	return path
+
+func _apply_dynamic_path_penalties(requester: Entity) -> Array[Vector2i]:
+	var reserved_cells: Array[Vector2i] = []
+	if not dynamic_path_avoidance:
+		return reserved_cells
+	for candidate in get_tree().get_nodes_in_group("entities"):
+		if candidate == requester or not candidate is Entity:
+			continue
+		var movement := (candidate as Entity).get_component(MovementComponent) as MovementComponent
+		if movement == null:
+			continue
+		var planned_path := movement.get_navigation_path()
+		if planned_path.size() < 2:
+			continue
+		for path_index in range(1, planned_path.size()):
+			var path_point := planned_path[path_index]
+			# Preserve the final approach lane; penalize the shared travel corridor
+			# rather than making units fight over the exact destination cell.
+			if path_index == planned_path.size() - 1:
+				continue
+			var cell := world_to_cell(path_point)
+			for y in range(-dynamic_path_reservation_radius, dynamic_path_reservation_radius + 1):
+				for x in range(-dynamic_path_reservation_radius, dynamic_path_reservation_radius + 1):
+					var reserved_cell := cell + Vector2i(x, y)
+					if not is_inside(reserved_cell) or not is_traversable(get_tile(reserved_cell)) or reserved_cells.has(reserved_cell):
+						continue
+					reserved_cells.append(reserved_cell)
+					_navigation_grid.set_point_weight_scale(reserved_cell, dynamic_path_penalty)
+	return reserved_cells
+
+func _clear_dynamic_path_penalties(reserved_cells: Array[Vector2i]) -> void:
+	for cell in reserved_cells:
+		_navigation_grid.set_point_weight_scale(cell, 1.0)
 
 func _find_closest_reachable_goal(start_cell: Vector2i, target: Vector2, clearance: float) -> Dictionary:
 	var closest_position := Vector2.ZERO

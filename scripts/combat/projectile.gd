@@ -8,6 +8,7 @@ extends Area2D
 var source: Entity
 var target: Entity
 var lifetime := 1.5
+var _impact_processed := false
 
 func _ready() -> void:
 	body_entered.connect(_on_body_entered)
@@ -30,15 +31,19 @@ func _physics_process(delta: float) -> void:
 		queue_free()
 
 func _on_body_entered(body: Node2D) -> void:
+	if _impact_processed:
+		return
 	if body == source:
 		return
 	if body == target and body is Entity:
+		_impact_processed = true
 		var target_health := (body as Entity).get_component(HealthComponent) as HealthComponent
 		if target_health != null:
 			target_health.damage(damage, source)
 		queue_free()
 		return
 	if body is CollisionObject2D and (body as CollisionObject2D).get_collision_layer_value(6):
+		_impact_processed = true
 		queue_free()
 		return
 	if not body is Entity:
@@ -46,6 +51,7 @@ func _on_body_entered(body: Node2D) -> void:
 	var health := (body as Entity).get_component(HealthComponent) as HealthComponent
 	if health == null:
 		return
+	_impact_processed = true
 	health.damage(damage, source)
 	queue_free()
 

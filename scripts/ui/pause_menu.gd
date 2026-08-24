@@ -10,9 +10,9 @@ var _hint: Label
 var _settings_section: VBoxContainer
 var _camera_speed_slider: HSlider
 var _camera_speed_value: Label
+var _grid_check: CheckButton
 var _tile_details_check: CheckButton
 var _nameplates_check: CheckButton
-var _team_markers_check: CheckButton
 
 func _ready() -> void:
 	# The menu must receive Escape both before and after pausing.
@@ -134,17 +134,17 @@ func _build_ui() -> void:
 	_tile_details_check.toggled.connect(_on_tile_details_toggled)
 	_settings_section.add_child(_tile_details_check)
 
+	_grid_check = CheckButton.new()
+	_grid_check.text = "Terrain grid"
+	_grid_check.button_pressed = _current_grid_enabled()
+	_grid_check.toggled.connect(_on_grid_toggled)
+	_settings_section.add_child(_grid_check)
+
 	_nameplates_check = CheckButton.new()
 	_nameplates_check.text = "Unit nameplates"
 	_nameplates_check.button_pressed = CharacterEntity.show_nameplates
 	_nameplates_check.toggled.connect(_on_nameplates_toggled)
 	_settings_section.add_child(_nameplates_check)
-
-	_team_markers_check = CheckButton.new()
-	_team_markers_check.text = "Team markers"
-	_team_markers_check.button_pressed = CharacterEntity.show_team_markers
-	_team_markers_check.toggled.connect(_on_team_markers_toggled)
-	_settings_section.add_child(_team_markers_check)
 
 	var back_button := Button.new()
 	back_button.text = "BACK"
@@ -192,6 +192,20 @@ func _current_tile_details_enabled() -> bool:
 	var terrain_map := maps[0] as TerrainMap
 	return terrain_map.draw_tile_details if terrain_map != null else true
 
+func _current_grid_enabled() -> bool:
+	var maps := get_tree().get_nodes_in_group("terrain_maps")
+	if maps.is_empty():
+		return false
+	var terrain_map := maps[0] as TerrainMap
+	return terrain_map.draw_grid if terrain_map != null else false
+
+func _on_grid_toggled(enabled: bool) -> void:
+	for terrain in get_tree().get_nodes_in_group("terrain_maps"):
+		var terrain_map := terrain as TerrainMap
+		if terrain_map != null:
+			terrain_map.draw_grid = enabled
+			terrain_map.queue_redraw()
+
 func _on_tile_details_toggled(enabled: bool) -> void:
 	for terrain in get_tree().get_nodes_in_group("terrain_maps"):
 		var terrain_map := terrain as TerrainMap
@@ -201,10 +215,6 @@ func _on_tile_details_toggled(enabled: bool) -> void:
 
 func _on_nameplates_toggled(enabled: bool) -> void:
 	CharacterEntity.show_nameplates = enabled
-	_queue_entity_redraws()
-
-func _on_team_markers_toggled(enabled: bool) -> void:
-	CharacterEntity.show_team_markers = enabled
 	_queue_entity_redraws()
 
 func _queue_entity_redraws() -> void:

@@ -19,12 +19,17 @@ var facing_direction := Vector2.UP
 var _last_teammate_push_frame := -1
 var _last_teammate_push_entity_id := -1
 var _formation_collision_ignored: Array[Entity] = []
+var _spatial_index: Node
 
 func _ready() -> void:
 	network_entity_id = NetworkSession.register_entity(self, network_entity_id)
 	tree_exiting.connect(_unregister_network_entity)
 	NetworkSession.session_mode_changed.connect(_on_session_mode_changed)
 	add_to_group("entities")
+	_spatial_index = _find_spatial_index()
+	if _spatial_index != null:
+		_spatial_index.register_entity(self)
+		tree_exiting.connect(_unregister_spatial_entity)
 	if grounded:
 		# Structures are solid to units and are also projectile/LOS blockers.
 		collision_layer |= 1 << 3 # Structures (layer 4)
@@ -50,6 +55,10 @@ func is_owned_by_peer(peer_id: int) -> bool:
 func _on_session_mode_changed(_mode: int) -> void:
 	_update_component_authority()
 
+func _physics_process(_delta: float) -> void:
+	if _spatial_index != null:
+		_spatial_index.update_entity(self)
+
 func _update_component_authority() -> void:
 	var authority_enabled := is_simulation_authority()
 	for component in _components:
@@ -57,6 +66,23 @@ func _update_component_authority() -> void:
 
 func _unregister_network_entity() -> void:
 	NetworkSession.unregister_entity(network_entity_id, self)
+
+func _unregister_spatial_entity() -> void:
+	if _spatial_index != null:
+		_spatial_index.unregister_entity(self)
+
+func get_nearby_entities(radius: float) -> Array[Entity]:
+	if _spatial_index != null:
+		return _spatial_index.query_radius(global_position, radius)
+	var nearby: Array[Entity] = []
+	for candidate in get_tree().get_nodes_in_group("entities"):
+		if candidate is Entity:
+			nearby.append(candidate as Entity)
+	return nearby
+
+func _find_spatial_index() -> Node:
+	var indexes := get_tree().get_nodes_in_group("entity_spatial_indexes")
+	return null if indexes.is_empty() else indexes[0] as Node
 
 func get_component(component_type: Variant) -> EntityComponent:
 	for component in _components:
@@ -116,7 +142,7 @@ func push_teammates(direction: Vector2, distance: float) -> void:
 	if own_team == null:
 		return
 	var desired_direction := direction.normalized()
-	for candidate in get_tree().get_nodes_in_group("entities"):
+	for candidate in get_nearby_entities(collision_radius * 4.0 + 64.0):
 		if candidate == self or not candidate is Entity:
 			continue
 		var other := candidate as Entity
@@ -247,6 +273,25 @@ func separate_from_teammate(other: Entity) -> void:
 		var terrain_map := maps[0] as TerrainMap
 		global_position = terrain_map.clamp_entity_position(global_position, collision_radius)
 		other.global_position = terrain_map.clamp_entity_position(other.global_position, other.collision_radius)
+
+func separate_overlapping_teammates() -> void:
+	# Used only when a moving unit has stopped making progress toward its goal.
+	# A single deterministic separation pass breaks dense teammate contacts
+	# without adding a permanent radial-avoidance force to normal movement.
+	var own_team := get_component(TeamComponent) as TeamComponent
+	if own_team == null:
+		return
+	for candidate in get_nearby_entities(collision_radius * 4.0 + 64.0):
+		if candidate == self or not candidate is Entity:
+			continue
+		var other := candidate as Entity
+		var other_team := other.get_component(TeamComponent) as TeamComponent
+		if other_team == null or other_team.team != own_team.team or other.grounded:
+			continue
+		if is_formation_collision_ignored(other):
+			continue
+		if global_position.distance_to(other.global_position) < collision_radius + other.collision_radius:
+			separate_from_teammate(other)
 
 func is_hold_position() -> bool:
 	var combat := get_component(CombatComponent) as CombatComponent

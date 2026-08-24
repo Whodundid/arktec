@@ -13,6 +13,7 @@
 [ext_resource type="Script" uid="uid://bp7dn5ecrmyro" path="res://scripts/world/move_order_markers.gd" id="11_move_markers"]
 [ext_resource type="Script" uid="uid://bh41r01173go" path="res://scripts/world/group_movement_controller.gd" id="12_group_movement"]
 [ext_resource type="Script" uid="uid://c3wfxgl2o1qtj" path="res://scripts/combat/player_unit_spawner.gd" id="13_player_spawner"]
+[ext_resource type="Script" path="res://scripts/world/entity_spatial_index.gd" id="14_spatial_index"]
 
 [node name="Main" type="Node2D" unique_id=1433394661]
 script = ExtResource("1_main")
@@ -20,21 +21,25 @@ script = ExtResource("1_main")
 [node name="World" type="Node2D" parent="." unique_id=1469237411]
 script = ExtResource("2_world")
 
+[node name="EntitySpatialIndex" type="Node" parent="." unique_id=1600000006]
+script = ExtResource("14_spatial_index")
+
 [node name="TerrainMap" type="Node2D" parent="World" unique_id=599955606]
+texture_filter = 1
 script = ExtResource("7_terrain")
 
 [node name="RTSCamera" type="Camera2D" parent="." unique_id=876778534]
 script = ExtResource("4_camera")
 
 [node name="Mercenary" parent="." unique_id=1182437610 instance=ExtResource("5_character")]
-position = Vector2(0, 190)
+position = Vector2(-345, 230)
 network_entity_id = 1001
 
-[node name="Enemy" parent="." unique_id=767620734 instance=ExtResource("5_character")]
-position = Vector2(557, 105)
+[node name="Guy" parent="." unique_id=767620734 instance=ExtResource("5_character")]
+position = Vector2(-372, 131)
 collision_layer = 4
 display_name = "Enemy"
-body_color = Color(0.65, 0.22, 0.25, 1)
+body_color = Color(0.2776597, 0.41933236, 0.42906716, 1)
 network_entity_id = 2001
 
 [node name="EnemySpawner" type="Node2D" parent="." unique_id=1600000001]

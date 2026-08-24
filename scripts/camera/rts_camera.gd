@@ -11,7 +11,7 @@ extends Camera2D
 @export var min_zoom := 0.65
 @export var max_zoom := 1.6
 @export var world_limits := Rect2(-900.0, -520.0, 1800.0, 1040.0)
-@export_range(0.0, 200.0, 1.0) var bottom_ui_safe_area := 76.0
+@export_range(0.0, 300.0, 1.0) var bottom_ui_safe_area := 195.0
 
 var _dragging := false
 

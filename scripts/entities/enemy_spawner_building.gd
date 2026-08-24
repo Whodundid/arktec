@@ -24,8 +24,12 @@ signal building_destroyed
 @export_range(0.0, 1.0, 0.01) var builder_chance := 0.0
 @export var guarantee_builder := false
 @export var under_construction := false
+@export_range(16.0, 160.0, 1.0) var construction_presence_radius := 72.0
+@export_range(0.0, 1.0, 0.01) var construction_progress := 0.0
+@export_range(1.0, 10000.0, 1.0) var construction_max_health := 250.0
 @export_range(32.0, 600.0, 1.0) var territory_radius := 180.0
 @export_range(32.0, 800.0, 1.0) var defense_alert_radius := 320.0
+@export_range(0.05, 1.0, 0.05) var defense_alert_cooldown := 0.25
 
 var _active_enemies: Array[Entity] = []
 var _next_spawn_index := 0
@@ -33,6 +37,7 @@ var _destroyed := false
 var _random := RandomNumberGenerator.new()
 var _builder_spawned := false
 var shared_territory_owner: Node2D
+var _defense_alert_remaining := 0.0
 
 func _ready() -> void:
 	super._ready()
@@ -47,6 +52,10 @@ func _ready() -> void:
 		health.attacked.connect(_on_building_attacked)
 	call_deferred("_spawn_initial_enemies")
 	queue_redraw()
+
+func _physics_process(delta: float) -> void:
+	super._physics_process(delta)
+	_defense_alert_remaining = maxf(_defense_alert_remaining - delta, 0.0)
 
 func _spawn_initial_enemies() -> void:
 	if not is_simulation_authority():
@@ -131,7 +140,10 @@ func _on_building_died() -> void:
 func _on_building_attacked(attacker: Entity) -> void:
 	if attacker == null or not is_instance_valid(attacker):
 		return
-	for candidate in get_tree().get_nodes_in_group("entities"):
+	if _defense_alert_remaining > 0.0:
+		return
+	_defense_alert_remaining = defense_alert_cooldown
+	for candidate in get_nearby_entities(defense_alert_radius):
 		if candidate == self or not candidate is Entity:
 			continue
 		var defender := candidate as Entity
@@ -196,11 +208,24 @@ func get_active_enemies() -> Array[Entity]:
 func set_shared_territory_owner(owner: Node2D) -> void:
 	shared_territory_owner = owner
 
+func set_construction_progress(value: float) -> void:
+	construction_progress = clampf(value, 0.0, 1.0)
+	var health := get_component(HealthComponent) as HealthComponent
+	if health != null and under_construction:
+		var damage_taken := maxf(health.maximum_health - health.current_health, 0.0)
+		var next_maximum := lerpf(1.0, construction_max_health, construction_progress)
+		health.maximum_health = next_maximum
+		health.current_health = maxf(next_maximum - damage_taken, 0.0)
+		health.health_changed.emit(health.current_health, health.maximum_health)
+	queue_redraw()
+
 func complete_construction(unit_count: int) -> void:
 	if not under_construction or _destroyed:
 		return
+	set_construction_progress(1.0)
 	under_construction = false
 	max_active_enemies = maxi(unit_count, 1)
+	queue_redraw()
 	call_deferred("_spawn_initial_enemies")
 
 func _draw() -> void:
@@ -213,5 +238,10 @@ func _draw() -> void:
 	draw_rect(Rect2(-30, -24, 60, 48), faction_color, false, 3.0)
 	draw_circle(Vector2.ZERO, 13.0, faction_color.darkened(0.35))
 	draw_circle(Vector2.ZERO, 6.0, faction_color.lightened(0.3))
+	if under_construction:
+		var progress_bar := Rect2(-30.0, -38.0, 60.0, 6.0)
+		draw_rect(progress_bar, Color("17242b"), true)
+		draw_rect(Rect2(progress_bar.position, Vector2(progress_bar.size.x * construction_progress, progress_bar.size.y)), Color("f4d58b"), true)
+		draw_rect(progress_bar, Color("f4d58b"), false, 1.0)
 	var label := "Constructing" if under_construction else faction_name
 	draw_string(ThemeDB.fallback_font, Vector2(-70, 48), label, HORIZONTAL_ALIGNMENT_CENTER, 140, 12, faction_color.lightened(0.25))

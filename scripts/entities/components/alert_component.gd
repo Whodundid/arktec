@@ -22,9 +22,11 @@ enum Role { GUARD, PURSUER, FLANKER, BUILDER }
 @export_range(0.4, 0.95, 0.05) var firing_standoff_ratio := 0.7
 @export_range(1.0, 64.0, 1.0) var firing_standoff_tolerance := 20.0
 @export_range(-3.14, 3.14, 0.05) var flank_angle_bias := 0.0
+@export_range(0.05, 0.5, 0.01) var decision_interval := 0.12
 
 var state := State.IDLE
 var _attacker: Entity
+var _pursuit_base_angle := 0.0
 var _last_known_position := Vector2.ZERO
 var _state_remaining := 0.0
 var _return_position := Vector2.ZERO
@@ -34,9 +36,28 @@ var _search_destination_active := false
 var _movement: MovementComponent
 var _combat: CombatComponent
 var _wander: WanderComponent
+var _decision_remaining := 0.0
+var construction_active := false
+
+func set_construction_active(active: bool) -> void:
+	construction_active = active
+	if active:
+		_attacker = null
+		state = State.IDLE
+		if _movement != null:
+			_movement.stop()
+		if _wander != null:
+			_wander.enabled = false
+		if _combat != null:
+			_combat.set_auto_target_mode(CombatComponent.AUTO_HOLD_POSITION)
+	else:
+		if _wander != null:
+			_wander.enabled = true
+		if _combat != null:
+			_combat.set_auto_target_mode(CombatComponent.AUTO_HOLD_POSITION)
 
 func set_role(new_role: int) -> void:
-	role = clampi(new_role, Role.GUARD, Role.FLANKER)
+	role = clampi(new_role, Role.GUARD, Role.BUILDER)
 	match role:
 		Role.GUARD:
 			# Guards protect the local area and give up a chase quickly.
@@ -69,15 +90,17 @@ func set_role(new_role: int) -> void:
 			pursuit_spacing = 96.0
 			flank_angle_bias = 0.9
 		Role.BUILDER:
-			# Builders are valuable and reluctant to leave their work area.
-			alert_radius = 340.0
-			pursuit_duration = 2.5
+			# Builders are valuable specialists, not frontline fighters. They
+			# retreat readily and only tolerate a very short defensive response.
+			alert_radius = 220.0
+			pursuit_duration = 1.0
 			investigate_radius = 64.0
-			max_pursuit_distance = 180.0
+			max_pursuit_distance = 120.0
 			leash_wait_duration = 1.0
-			firing_standoff_ratio = 0.8
+			firing_standoff_ratio = 0.9
 			pursuit_spacing = 32.0
 			flank_angle_bias = 0.0
+			retreat_health_ratio = 0.75
 
 static func get_role_name(role_value: int) -> String:
 	match role_value:
@@ -128,10 +151,12 @@ func on_entity_ready() -> void:
 	if health != null:
 		health.attacked.connect(_on_attacked)
 		health.health_changed.connect(_on_health_changed)
+	_decision_remaining = fmod(float(entity.get_instance_id()), decision_interval)
 
 func _physics_process(delta: float) -> void:
 	if not enabled or entity == null or _movement == null or _combat == null:
 		return
+	_decision_remaining = maxf(_decision_remaining - delta, 0.0)
 
 	match state:
 		State.PURSUING:
@@ -146,6 +171,11 @@ func _physics_process(delta: float) -> void:
 func _on_attacked(attacker: Entity) -> void:
 	if not enabled or not _is_valid_opponent(attacker):
 		return
+	if construction_active:
+		return
+	if role == Role.BUILDER:
+		_begin_return()
+		return
 	if _is_low_health():
 		_begin_return()
 		return
@@ -159,7 +189,7 @@ func _on_health_changed(current_health: float, maximum_health: float) -> void:
 		_begin_return()
 
 func _broadcast_alert(attacker: Entity) -> void:
-	for candidate in get_tree().get_nodes_in_group("entities"):
+	for candidate in entity.get_nearby_entities(alert_radius):
 		if candidate == entity or not candidate is Entity:
 			continue
 		var ally := candidate as Entity
@@ -174,9 +204,18 @@ func _broadcast_alert(attacker: Entity) -> void:
 func _respond_to_alert(attacker: Entity, known_position: Vector2) -> void:
 	if not _is_valid_opponent(attacker):
 		return
+	if construction_active:
+		return
+	if role == Role.BUILDER:
+		_last_known_position = known_position
+		_begin_return()
+		return
+	if _attacker != attacker:
+		_pursuit_base_angle = attacker.global_position.direction_to(entity.global_position).angle()
 	_attacker = attacker
 	_last_known_position = known_position
 	_state_remaining = pursuit_duration
+	_decision_remaining = 0.0
 	state = State.PURSUING
 	if _wander != null:
 		_wander.enabled = false
@@ -186,8 +225,14 @@ func _respond_to_alert(attacker: Entity, known_position: Vector2) -> void:
 func _update_pursuit(delta: float) -> void:
 	_state_remaining -= delta
 	if not _is_valid_opponent(_attacker):
-		# A dead/despawned attacker is different from an attacker who escaped.
-		# Skip investigation and return home immediately.
+		# The original attacker may have died while other enemies are still
+		# standing beside the group. Reacquire an immediately visible unit before
+		# deciding that the alert is over.
+		_combat.clear_target("attacker_lost")
+		if _combat.acquire_nearest_visible_unit():
+			var replacement := _combat.target
+			_respond_to_alert(replacement, replacement.global_position)
+			return
 		_begin_return()
 		return
 	if _state_remaining <= 0.0:
@@ -196,6 +241,9 @@ func _update_pursuit(delta: float) -> void:
 	if _wander != null and entity.global_position.distance_to(_wander.get_home_territory_center()) > max_pursuit_distance:
 		_begin_leash_wait()
 		return
+	if _decision_remaining > 0.0:
+		return
+	_decision_remaining = decision_interval
 
 	var terrain_map := _find_terrain_map()
 	var can_see_attacker := terrain_map == null or terrain_map.has_line_of_sight(entity.global_position, _attacker.global_position, _combat.projectile_radius, [_attacker.get_rid()])
@@ -203,10 +251,11 @@ func _update_pursuit(delta: float) -> void:
 		_last_known_position = _attacker.global_position
 		var firing_standoff := _combat.attack_range * firing_standoff_ratio
 		var pursuit_position := _get_pursuit_position(firing_standoff)
-		var distance_to_attacker := entity.global_position.distance_to(_attacker.global_position)
-		# Stop inside weapon range long enough for CombatComponent to fire. Only
-		# resume pursuit after the attacker creates a meaningful gap.
-		if distance_to_attacker > firing_standoff + firing_standoff_tolerance:
+		# Each pursuer owns a distinct standoff position. Being inside weapon
+		# range is not enough by itself; stopping there makes several units choose
+		# the same approach lane and form an immovable clump.
+		var distance_to_pursuit_position := entity.global_position.distance_to(pursuit_position)
+		if distance_to_pursuit_position > firing_standoff_tolerance:
 			_movement.move_to(pursuit_position)
 		else:
 			_movement.stop()
@@ -225,6 +274,7 @@ func _begin_investigation() -> void:
 	_search_points = _build_search_pattern()
 	_search_index = 0
 	_search_destination_active = false
+	_decision_remaining = 0.0
 	_combat.clear_target("investigate")
 	_combat.set_auto_target_mode(CombatComponent.AUTO_HOLD_POSITION)
 	if _wander != null:
@@ -250,6 +300,7 @@ func _update_investigation(delta: float) -> void:
 
 func _begin_return() -> void:
 	state = State.RETURNING
+	_decision_remaining = 0.0
 	_combat.clear_target("return_to_base")
 	_combat.set_auto_target_mode(CombatComponent.AUTO_HOLD_POSITION)
 	if _wander != null:
@@ -276,7 +327,7 @@ func _update_return() -> void:
 	if _wander != null and entity.global_position.distance_to(_return_position) <= arrival_distance:
 		state = State.IDLE
 		_attacker = null
-		_combat.set_auto_target_mode(CombatComponent.AUTO_ATTACK_MOVE)
+		_combat.set_auto_target_mode(CombatComponent.AUTO_HOLD_POSITION if role == Role.BUILDER else CombatComponent.AUTO_ATTACK_MOVE)
 		_wander.enabled = true
 
 func _build_search_pattern() -> Array[Vector2]:
@@ -303,7 +354,7 @@ func _move_to_next_search_point() -> void:
 
 func _get_pursuit_position(standoff_distance: float) -> Vector2:
 	var pursuers: Array[AlertComponent] = []
-	for candidate in get_tree().get_nodes_in_group("entities"):
+	for candidate in entity.get_nearby_entities(maxf(_combat.attack_range, pursuit_spacing) + 160.0):
 		if not candidate is Entity:
 			continue
 		var ally := candidate as Entity
@@ -318,11 +369,9 @@ func _get_pursuit_position(standoff_distance: float) -> Vector2:
 	var slot_index := pursuers.find(self)
 	if slot_index < 0:
 		slot_index = 0
-	var attacker_to_self := _attacker.global_position.direction_to(entity.global_position)
-	var base_angle := attacker_to_self.angle() if attacker_to_self.length_squared() > 0.0 else 0.0
 	var angular_spread := clampf(pursuit_spacing / maxf(standoff_distance, 1.0), 0.25, 0.8)
 	var angle_offset := (float(slot_index) - float(pursuers.size() - 1) * 0.5) * angular_spread
-	return _attacker.global_position + Vector2.RIGHT.rotated(base_angle + flank_angle_bias + angle_offset) * standoff_distance
+	return _attacker.global_position + Vector2.RIGHT.rotated(_pursuit_base_angle + flank_angle_bias + angle_offset) * standoff_distance
 
 func _is_low_health() -> bool:
 	var health := entity.get_component(HealthComponent) as HealthComponent

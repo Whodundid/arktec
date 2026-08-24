@@ -6,19 +6,29 @@ extends Node2D
 
 @export var formation_enabled := false
 @export_range(16.0, 96.0, 1.0) var formation_spacing := 36.0
+@export_range(0.0, 2.0, 0.05) var arrival_footprint_scale := 0.75
 
 var _group_destination: Variant = null
 var _group_marker_remaining := 0.0
 var _group_entities: Array[Entity] = []
+var _active_group_entities: Array[Entity] = []
+var _active_group_destination: Variant = null
+var _active_group_unit_arrival_radius := 0.0
 var _formation_entities: Array[Entity] = []
 var _formation_origin := Vector2.ZERO
 var _formation_goal := Vector2.ZERO
 var _formation_offsets: Array[Vector2] = []
+var _formation_layout_entities: Array[Entity] = []
+var _formation_layout_offsets: Array[Vector2] = []
 var _formation_elapsed := 0.0
 var _formation_duration := 0.0
 var _formation_group_speed := 0.0
 var _formation_retarget_remaining := 0.0
 const FORMATION_RETARGET_INTERVAL := 0.12
+# Keep this smaller than the distance a formation travels between correction
+# ticks. Otherwise a unit can finish its temporary slot path, report no
+# destination, and wait for the next correction before moving again.
+const FORMATION_DESTINATION_REFRESH_DISTANCE := 12.0
 const COMMAND_CONTEXT_ORDER := &"context_order"
 const COMMAND_ATTACK_MOVE := &"attack_move"
 const COMMAND_STANCE := &"stance"
@@ -33,6 +43,7 @@ func _process(delta: float) -> void:
 	if _group_marker_remaining <= 0.0:
 		_group_destination = null
 		_group_entities.clear()
+	_update_group_arrival()
 	_update_formation_motion(delta)
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -40,6 +51,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		formation_enabled = not formation_enabled
 		if not formation_enabled:
 			_clear_formation_motion()
+			_clear_formation_layout()
 		print("Formation movement: %s" % ("ON" if formation_enabled else "OFF"))
 		get_viewport().set_input_as_handled()
 		return
@@ -213,7 +225,9 @@ func _try_issue_attack(selected: Array[Entity], world_position: Vector2) -> bool
 		return false
 	_group_destination = null
 	_group_entities.clear()
+	_clear_group_arrival()
 	_clear_formation_motion()
+	_clear_formation_layout()
 	var target := leader_combat.target
 	for index in range(1, selected.size()):
 		var combat := selected[index].get_component(CombatComponent) as CombatComponent
@@ -233,6 +247,7 @@ func _issue_move(selected: Array[Entity], destination: Vector2) -> void:
 			_retarget_active_formation(destination)
 			return
 	_clear_formation_motion()
+	_clear_group_arrival()
 	_group_destination = destination
 	_group_entities = selected.duplicate()
 	_group_marker_remaining = 0.5
@@ -244,11 +259,12 @@ func _issue_move(selected: Array[Entity], destination: Vector2) -> void:
 		var movement := entity.get_component(MovementComponent) as MovementComponent
 		if movement == null:
 			continue
-		if entity.global_position.distance_to(destinations[index]) <= movement.stopping_distance:
+		var arrival_buffer := _group_arrival_buffer(selected)
+		if entity.global_position.distance_to(destinations[index]) <= movement.stopping_distance + arrival_buffer:
 			movement.stop()
 			actual_destinations.append(entity.global_position)
 			continue
-		movement.move_to(destinations[index])
+		movement.move_to(destinations[index], arrival_buffer)
 		var resolved_destination: Variant = movement.get_destination_position()
 		if resolved_destination != null:
 			actual_destinations.append(resolved_destination as Vector2)
@@ -272,7 +288,9 @@ func _issue_move(selected: Array[Entity], destination: Vector2) -> void:
 		for actual_destination in actual_destinations:
 			destination_sum += actual_destination
 		_group_destination = destination_sum / float(actual_destinations.size())
+	_arm_group_arrival(selected, _group_destination as Vector2)
 	if formation_enabled:
+		_clear_group_arrival()
 		_begin_formation_motion(selected, _group_destination as Vector2)
 
 func _retarget_active_formation(destination: Vector2) -> void:
@@ -286,6 +304,14 @@ func _retarget_active_formation(destination: Vector2) -> void:
 	_formation_retarget_remaining = 0.0
 	_group_destination = destination
 	_group_marker_remaining = 0.5
+	# Discard the previous travel paths immediately. Otherwise a reversal can
+	# briefly send units toward their old slots before the next correction tick.
+	for entity in _formation_entities:
+		if not is_instance_valid(entity):
+			continue
+		var movement := entity.get_component(MovementComponent) as MovementComponent
+		if movement != null:
+			movement.stop()
 
 func _begin_formation_motion(selected: Array[Entity], goal: Vector2) -> void:
 	if selected.is_empty():
@@ -297,10 +323,18 @@ func _begin_formation_motion(selected: Array[Entity], goal: Vector2) -> void:
 	for entity in _formation_entities:
 		position_sum += entity.global_position
 	_formation_origin = position_sum / float(_formation_entities.size())
-	var final_slots := _formation_destinations(_formation_entities, goal)
-	_formation_offsets.clear()
-	for final_slot in final_slots:
-		_formation_offsets.append(final_slot - goal)
+	if _has_matching_formation_layout(_formation_entities):
+		# Keep the established world-space arrangement when a completed formation
+		# receives another order. Recomputing from the new travel heading would
+		# swap front and back units on a 180-degree move.
+		_formation_offsets = _formation_layout_offsets.duplicate()
+	else:
+		var final_slots := _formation_destinations(_formation_entities, goal)
+		_formation_offsets.clear()
+		for final_slot in final_slots:
+			_formation_offsets.append(final_slot - goal)
+		_formation_layout_entities = _formation_entities.duplicate()
+		_formation_layout_offsets = _formation_offsets.duplicate()
 	_formation_duration = 0.0
 	for index in range(_formation_entities.size()):
 		var movement := _formation_entities[index].get_component(MovementComponent) as MovementComponent
@@ -323,6 +357,7 @@ func _update_formation_motion(delta: float) -> void:
 	_formation_retarget_remaining = FORMATION_RETARGET_INTERVAL
 	var progress := clampf(_formation_elapsed / maxf(_formation_duration, 0.1), 0.0, 1.0)
 	var formation_center := _formation_origin.lerp(_formation_goal, progress)
+	var is_final_formation_position := progress >= 1.0
 	var all_arrived := true
 	for index in range(_formation_entities.size()):
 		var entity := _formation_entities[index]
@@ -339,9 +374,19 @@ func _update_formation_motion(delta: float) -> void:
 			continue
 		var slot := formation_center + _formation_offsets[index]
 		var distance := entity.global_position.distance_to(slot)
-		if distance > movement.stopping_distance:
+		# The slot is moving with the formation during transit, so treating the
+		# current slot as an arrival point makes units stop, lose their destination,
+		# and then restart every few frames. Only use the footprint buffer once the
+		# formation center has reached its final destination.
+		var arrival_buffer := _group_arrival_buffer(_formation_entities) if is_final_formation_position else 0.0
+		if distance > movement.stopping_distance + arrival_buffer:
 			all_arrived = false
-			movement.move_to(slot)
+			var current_destination: Variant = movement.get_destination_position()
+			var destination_needs_refresh := current_destination == null
+			if current_destination is Vector2:
+				destination_needs_refresh = (current_destination as Vector2).distance_to(slot) > FORMATION_DESTINATION_REFRESH_DISTANCE
+			if destination_needs_refresh:
+				movement.move_to(slot, arrival_buffer)
 			# Slot correction and group travel are separate concerns. Use the
 			# group's travel speed immediately so small early slot errors do not
 			# create an artificial acceleration/inertia ramp.
@@ -349,6 +394,8 @@ func _update_formation_motion(delta: float) -> void:
 			if formation_speed <= 0.0:
 				formation_speed = movement.get_move_speed_pixels_per_second()
 			movement.set_formation_speed_pixels_per_second(minf(movement.get_move_speed_pixels_per_second(), formation_speed))
+		elif is_final_formation_position:
+			movement.finish_rotation_towards_last_travel_direction()
 	if progress >= 1.0 and all_arrived:
 		_clear_formation_motion()
 
@@ -360,6 +407,58 @@ func _clear_formation_motion() -> void:
 	_formation_duration = 0.0
 	_formation_group_speed = 0.0
 	_formation_retarget_remaining = 0.0
+
+func _clear_formation_layout() -> void:
+	_formation_layout_entities.clear()
+	_formation_layout_offsets.clear()
+
+func _has_matching_formation_layout(entities: Array[Entity]) -> bool:
+	if entities.size() != _formation_layout_entities.size() or entities.is_empty():
+		return false
+	for index in range(entities.size()):
+		if _formation_layout_entities[index] != entities[index]:
+			return false
+	return _formation_layout_offsets.size() == entities.size()
+
+func _arm_group_arrival(entities: Array[Entity], destination: Vector2) -> void:
+	if entities.is_empty() or formation_enabled:
+		return
+	_active_group_entities = entities.duplicate()
+	_active_group_destination = destination
+	_active_group_unit_arrival_radius = _group_unit_arrival_radius(entities)
+
+func _clear_group_arrival() -> void:
+	_active_group_entities.clear()
+	_active_group_destination = null
+	_active_group_unit_arrival_radius = 0.0
+
+func _update_group_arrival() -> void:
+	if _active_group_entities.is_empty() or not _active_group_destination is Vector2:
+		return
+	var all_units_arrived := true
+	var valid_count := 0
+	for entity in _active_group_entities:
+		if not is_instance_valid(entity):
+			continue
+		valid_count += 1
+		if entity.global_position.distance_to(_active_group_destination as Vector2) > _active_group_unit_arrival_radius:
+			all_units_arrived = false
+			break
+	if valid_count == 0:
+		_clear_group_arrival()
+		return
+	if not all_units_arrived:
+		return
+	# The order is satisfied as a group. Stopping everyone together prevents
+	# trailing units from pushing already-settled units sideways to reach the
+	# same point.
+	for entity in _active_group_entities:
+		if is_instance_valid(entity):
+			var movement := entity.get_component(MovementComponent) as MovementComponent
+			if movement != null:
+				movement.stop()
+				movement.finish_rotation_towards_last_travel_direction()
+	_clear_group_arrival()
 
 func _set_formation_collision_exceptions(ignored: bool) -> void:
 	for first_index in range(_formation_entities.size()):
@@ -380,6 +479,35 @@ func _free_move_destinations(selected: Array[Entity], destination: Vector2) -> A
 	for _entity in selected:
 		destinations.append(destination)
 	return destinations
+
+func _group_arrival_buffer(entities: Array[Entity]) -> float:
+	# Arrival is based on the physical footprint of the units, not the number of
+	# units selected. This lets a blob settle near a point instead of making its
+	# front unit push through the rest of the group to touch one exact pixel.
+	var largest_radius := 0.0
+	var largest_leeway := 0.0
+	for entity in entities:
+		if not is_instance_valid(entity):
+			continue
+		largest_radius = maxf(largest_radius, entity.collision_radius)
+		largest_leeway = maxf(largest_leeway, entity.collision_leeway)
+	return largest_radius * arrival_footprint_scale + largest_leeway
+
+func _group_unit_arrival_radius(entities: Array[Entity]) -> float:
+	var largest_radius := 0.0
+	var largest_leeway := 0.0
+	var largest_stopping_distance := 0.0
+	for entity in entities:
+		if not is_instance_valid(entity):
+			continue
+		largest_radius = maxf(largest_radius, entity.collision_radius)
+		largest_leeway = maxf(largest_leeway, entity.collision_leeway)
+		var movement := entity.get_component(MovementComponent) as MovementComponent
+		if movement != null:
+			largest_stopping_distance = maxf(largest_stopping_distance, movement.stopping_distance)
+	if largest_radius <= 0.0:
+		return 0.0
+	return largest_stopping_distance + largest_radius * arrival_footprint_scale + largest_leeway
 
 func _formation_destinations(selected: Array[Entity], destination: Vector2) -> Array[Vector2]:
 	var destinations: Array[Vector2] = []

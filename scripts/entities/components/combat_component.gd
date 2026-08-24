@@ -23,6 +23,8 @@ const AUTO_HOLD_POSITION := AutoTargetMode.HOLD_POSITION
 @export var projectile_damage := 20.0
 @export var projectile_radius := 6.0
 @export var auto_target_mode := AutoTargetMode.ATTACK_MOVE
+@export_range(0.05, 0.5, 0.01) var target_scan_interval := 0.12
+@export_range(0.05, 0.5, 0.01) var line_of_sight_check_interval := 0.1
 
 var target: Entity
 var _cooldown := 0.0
@@ -31,21 +33,38 @@ var _los_move_requested := false
 var attack_move_armed := false
 var _attack_move_active := true
 var _manual_move_active := false
+var _target_scan_remaining := 0.0
+var _line_of_sight_remaining := 0.0
+var _cached_line_of_sight := false
+var _cached_line_of_sight_target: Entity
+
+func on_entity_ready() -> void:
+	# Spread otherwise-identical sensing work across the physics frame instead
+	# of making every spawned unit perform its expensive scan simultaneously.
+	_target_scan_remaining = fmod(float(entity.get_instance_id()), target_scan_interval)
+	_line_of_sight_remaining = 0.0
 
 func _physics_process(delta: float) -> void:
 	if _cooldown > 0.0:
 		_cooldown -= delta
+	_target_scan_remaining = maxf(_target_scan_remaining - delta, 0.0)
+	_line_of_sight_remaining = maxf(_line_of_sight_remaining - delta, 0.0)
 
 	var movement := entity.get_component(MovementComponent) as MovementComponent
+	var alert := entity.get_component(AlertComponent) as AlertComponent
+	var is_builder := alert != null and alert.role == AlertComponent.Role.BUILDER
 	if _manual_move_active and (movement == null or not movement.is_moving()):
 		_manual_move_active = false
-	if target == null and not _manual_move_active and _attack_move_active and auto_target_mode == AutoTargetMode.ATTACK_MOVE:
+	if target == null and not is_builder and not _manual_move_active and _attack_move_active and auto_target_mode == AutoTargetMode.ATTACK_MOVE and _target_scan_remaining <= 0.0:
+		_target_scan_remaining = target_scan_interval
 		_acquire_nearest_visible_target()
 	if movement != null and movement.is_moving():
 		# Attack parties may have a strategic building target, but they should
 		# still react to hostile units they encounter on the way there.
-		if target != null and target.grounded and _acquire_nearest_visible_unit():
-			return
+		if not is_builder and target != null and target.grounded and _target_scan_remaining <= 0.0:
+			_target_scan_remaining = target_scan_interval
+			if _acquire_nearest_visible_unit():
+				return
 		if not _movement_blocked_last_frame:
 			attack_stopped.emit("moving")
 		_movement_blocked_last_frame = true
@@ -78,7 +97,7 @@ func _physics_process(delta: float) -> void:
 func try_set_target_at(world_position: Vector2) -> bool:
 	var best_target: Entity = null
 	var best_distance := INF
-	for candidate in get_tree().get_nodes_in_group("entities"):
+	for candidate in entity.get_nearby_entities(28.0):
 		if not candidate is Entity or candidate == entity:
 			continue
 		if not _is_opponent(candidate as Entity):
@@ -139,6 +158,9 @@ func set_target(new_target: Entity, stop_movement: bool = true) -> void:
 	if stop_movement and movement != null:
 		movement.stop()
 	target = new_target
+	_target_scan_remaining = 0.0
+	_line_of_sight_remaining = 0.0
+	_cached_line_of_sight_target = null
 	attack_move_armed = false
 	_attack_move_active = auto_target_mode != AutoTargetMode.HOLD_POSITION
 	_manual_move_active = false
@@ -151,6 +173,9 @@ func clear_target(reason: String = "manual") -> void:
 
 func is_manual_move_active() -> bool:
 	return _manual_move_active
+
+func acquire_nearest_visible_unit() -> bool:
+	return _acquire_nearest_visible_unit()
 
 func set_auto_target_mode(new_mode: int) -> void:
 	auto_target_mode = new_mode
@@ -167,7 +192,7 @@ func set_auto_target_mode(new_mode: int) -> void:
 func _acquire_nearest_visible_target() -> bool:
 	var best_target: Entity = null
 	var best_distance := INF
-	for candidate in get_tree().get_nodes_in_group("entities"):
+	for candidate in entity.get_nearby_entities(attack_range):
 		if not candidate is Entity or candidate == entity:
 			continue
 		var possible_target := candidate as Entity
@@ -194,7 +219,7 @@ func _acquire_nearest_visible_target() -> bool:
 func _acquire_nearest_visible_unit() -> bool:
 	var best_target: Entity = null
 	var best_distance := INF
-	for candidate in get_tree().get_nodes_in_group("entities"):
+	for candidate in entity.get_nearby_entities(attack_range):
 		if not candidate is Entity or candidate == entity:
 			continue
 		var possible_target := candidate as Entity
@@ -239,7 +264,11 @@ func _is_valid_target() -> bool:
 	return is_instance_valid(target) and _is_opponent(target) and target.get_component(HealthComponent) != null
 
 func _has_line_of_sight() -> bool:
-	return _has_line_of_sight_to(target)
+	if _cached_line_of_sight_target != target or _line_of_sight_remaining <= 0.0:
+		_cached_line_of_sight = _has_line_of_sight_to(target)
+		_cached_line_of_sight_target = target
+		_line_of_sight_remaining = line_of_sight_check_interval
+	return _cached_line_of_sight
 
 func _has_line_of_sight_to(candidate: Entity) -> bool:
 	var maps := get_tree().get_nodes_in_group("terrain_maps")
@@ -278,5 +307,7 @@ func _is_opponent(candidate: Entity) -> bool:
 
 func _clear_target(reason: String) -> void:
 	target = null
+	_cached_line_of_sight_target = null
+	_line_of_sight_remaining = 0.0
 	_los_move_requested = false
 	attack_stopped.emit(reason)
