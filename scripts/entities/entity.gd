@@ -4,7 +4,9 @@ extends CharacterBody2D
 ## Base for world entities. Behavior is composed from child EntityComponent nodes.
 
 var _components: Array[EntityComponent] = []
+enum ActionState { IDLE, HARVESTING, WAITING_FOR_RESOURCE, RETURNING_TO_BASE, CONSTRUCTING, COMBAT, PLAYER_COMMAND }
 var is_selected := false
+var action_state := ActionState.IDLE
 var facing_direction := Vector2.UP
 @export var network_entity_id := 0
 @export var owning_peer_id := 1 # Server peer by default.
@@ -48,6 +50,9 @@ func _ready() -> void:
 
 func is_simulation_authority() -> bool:
 	return NetworkSession.is_simulation_authority()
+
+func set_action_state(next_state: int) -> void:
+	action_state = next_state
 
 func is_owned_by_peer(peer_id: int) -> bool:
 	return owning_peer_id == peer_id

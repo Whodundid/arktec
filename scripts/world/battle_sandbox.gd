@@ -24,6 +24,7 @@ const FACTION_TERRITORY_SCRIPT = preload("res://scripts/world/faction_territory.
 @export_range(2.0, 10.0, 1.0) var expansion_spacing_tiles := 4.0
 @export_range(5.0, 120.0, 5.0) var builder_expansion_cooldown := 45.0
 @export_range(0, 8, 1) var max_builders_per_faction := 2
+@export var expansion_cost := 300
 
 var _factions: Array[Dictionary] = []
 var _wave_remaining: Array[float] = []
@@ -31,11 +32,13 @@ var _random := RandomNumberGenerator.new()
 var _expansions: Array[Dictionary] = []
 var _builder_cooldowns: Dictionary = {}
 var _attack_targets: Dictionary = {}
+var _ore_security_requests: Dictionary = {}
 var _expansion_spacing_remaining := 0.0
 
 func _ready() -> void:
 	if not NetworkSession.is_simulation_authority():
 		return
+	add_to_group("battle_sandboxes")
 	_random.randomize()
 	_create_faction(
 		"Red Faction",
@@ -76,6 +79,7 @@ func _physics_process(delta: float) -> void:
 			if _random.randf() <= expansion_chance:
 				_try_start_expansion(faction_index)
 	_update_war_states()
+	_prune_ore_security_requests()
 	_update_expansions(delta)
 	_maintain_attack_parties()
 
@@ -195,6 +199,123 @@ func _maintain_attack_parties() -> void:
 		if combat.target == null and not movement.is_moving():
 			_issue_attack_order(unit, target)
 
+func request_ore_security(worker: Entity, vein: Node2D) -> bool:
+	if not NetworkSession.is_simulation_authority() or not is_instance_valid(worker) or not is_instance_valid(vein):
+		return false
+	var worker_team := worker.get_component(TeamComponent) as TeamComponent
+	if worker_team == null:
+		return false
+	var enemy_target := _find_enemy_claiming_building(worker_team.team, vein.global_position)
+	if enemy_target == null:
+		return false
+	var request_key := enemy_target.get_instance_id()
+	if _ore_security_requests.has(request_key):
+		return true
+	_ore_security_requests[request_key] = {
+		"target_id": enemy_target.get_instance_id(),
+		"vein_id": vein.get_instance_id(),
+		"team": worker_team.team,
+	}
+	var faction := _find_faction_for_team(worker_team.team)
+	if faction.is_empty():
+		return true
+	var candidates: Array[Entity] = []
+	for building_value in faction["buildings"]:
+		var building := building_value as EnemySpawnerBuilding
+		if not is_instance_valid(building):
+			continue
+		for unit in building.get_active_enemies():
+			var alert := unit.get_component(AlertComponent) as AlertComponent
+			var combat := unit.get_component(CombatComponent) as CombatComponent
+			if alert == null or combat == null or alert.state != AlertComponent.State.IDLE:
+				continue
+			if alert.role == AlertComponent.Role.BUILDER or _is_reserved_for_expansion(unit) or combat.target != null:
+				continue
+			candidates.append(unit)
+	var target_position := enemy_target.global_position
+	candidates.sort_custom(func(first: Entity, second: Entity) -> bool:
+		return first.global_position.distance_squared_to(target_position) < second.global_position.distance_squared_to(target_position)
+	)
+	for index in range(mini(3, candidates.size())):
+		_issue_attack_order(candidates[index], enemy_target)
+	if candidates.is_empty():
+		_ore_security_requests.erase(request_key)
+	return true
+
+func request_worker_defense(worker: Entity, attacker: Entity) -> void:
+	if not NetworkSession.is_simulation_authority() or not is_instance_valid(worker) or not is_instance_valid(attacker):
+		return
+	var worker_team := worker.get_component(TeamComponent) as TeamComponent
+	if worker_team == null:
+		return
+	var faction := _find_faction_for_team(worker_team.team)
+	if faction.is_empty():
+		return
+	var candidates: Array[Entity] = []
+	for building_value in faction["buildings"]:
+		var building := building_value as EnemySpawnerBuilding
+		if not is_instance_valid(building):
+			continue
+		for unit in building.get_active_enemies():
+			var alert := unit.get_component(AlertComponent) as AlertComponent
+			var combat := unit.get_component(CombatComponent) as CombatComponent
+			if alert == null or combat == null or alert.role == AlertComponent.Role.BUILDER:
+				continue
+			if alert.state != AlertComponent.State.IDLE or combat.target != null or _is_reserved_for_expansion(unit):
+				continue
+			candidates.append(unit)
+	candidates.sort_custom(func(first: Entity, second: Entity) -> bool:
+		return first.global_position.distance_squared_to(worker.global_position) < second.global_position.distance_squared_to(worker.global_position)
+	)
+	for index in range(mini(3, candidates.size())):
+		_issue_defense_order(candidates[index], attacker)
+
+func _issue_defense_order(unit: Entity, attacker: Entity) -> void:
+	if not is_instance_valid(unit) or not is_instance_valid(attacker):
+		return
+	var movement := unit.get_component(MovementComponent) as MovementComponent
+	var combat := unit.get_component(CombatComponent) as CombatComponent
+	if movement == null or combat == null:
+		return
+	combat.set_auto_target_mode(CombatComponent.AUTO_ATTACK_MOVE)
+	movement.move_to(attacker.global_position)
+	combat.set_target(attacker, false)
+
+func _find_enemy_claiming_building(own_team: TeamComponent.Team, position: Vector2) -> EnemySpawnerBuilding:
+	var closest: EnemySpawnerBuilding
+	var closest_distance := INF
+	for candidate in get_tree().get_nodes_in_group("territory_owners"):
+		if not candidate is EnemySpawnerBuilding or not is_instance_valid(candidate):
+			continue
+		var building := candidate as EnemySpawnerBuilding
+		if building.faction_team == own_team or not building.contains_territory_position(position):
+			continue
+		var distance := building.global_position.distance_squared_to(position)
+		if distance < closest_distance:
+			closest_distance = distance
+			closest = building
+	return closest
+
+func _find_faction_for_team(team: TeamComponent.Team) -> Dictionary:
+	for faction in _factions:
+		if faction["team"] == team:
+			return faction
+	return {}
+
+func _prune_ore_security_requests() -> void:
+	for request_key in _ore_security_requests.keys():
+		var request: Dictionary = _ore_security_requests[request_key]
+		var target_value: Variant = instance_from_id(int(request.get("target_id", 0)))
+		var vein_value: Variant = instance_from_id(int(request.get("vein_id", 0)))
+		if target_value == null or not is_instance_valid(target_value) or not target_value is EnemySpawnerBuilding or vein_value == null or not is_instance_valid(vein_value) or not vein_value is Node2D:
+			_ore_security_requests.erase(request_key)
+			continue
+		var target := target_value as EnemySpawnerBuilding
+		var vein := vein_value as Node2D
+		var worker_team: TeamComponent.Team = request.get("team", TeamComponent.Team.NEUTRAL)
+		if worker_team != TeamComponent.Team.NEUTRAL and not target.contains_territory_position(vein.global_position):
+			_ore_security_requests.erase(request_key)
+
 func _random_wave_delay() -> float:
 	return wave_interval * _random.randf_range(0.65, 1.4)
 
@@ -213,6 +334,8 @@ func _try_start_expansion(faction_index: int) -> void:
 		if expansion["faction_index"] == faction_index:
 			return
 	var faction: Dictionary = _factions[faction_index]
+	if not ResourceLedger.can_afford(faction["team"], expansion_cost):
+		return
 	var builders := _find_available_builders(faction)
 	if builders.is_empty():
 		return
@@ -220,6 +343,17 @@ func _try_start_expansion(faction_index: int) -> void:
 	var position: Variant = _find_expansion_position(faction, builder)
 	if position == null:
 		return
+	if not ResourceLedger.spend_ore(faction["team"], expansion_cost):
+		return
+	var builder_harvest := builder.get_component(HarvestComponent) as HarvestComponent
+	if builder_harvest != null and not builder_harvest.can_start_construction():
+		ResourceLedger.add_ore(faction["team"], expansion_cost)
+		return
+	if builder_harvest != null:
+		builder_harvest.cancel_harvest_action()
+	var builder_alert := builder.get_component(AlertComponent) as AlertComponent
+	if builder_alert != null:
+		builder_alert.set_construction_active(true)
 	var escorts := _find_expansion_escorts(faction, builder)
 	var expansion := {
 		"faction_index": faction_index,
@@ -244,7 +378,8 @@ func _find_available_builders(faction: Dictionary) -> Array[Entity]:
 		for unit in building.get_active_enemies():
 			var alert := unit.get_component(AlertComponent) as AlertComponent
 			var cooldown := float(_builder_cooldowns.get(unit.get_instance_id(), 0.0))
-			if alert != null and alert.role == AlertComponent.Role.BUILDER and alert.state == AlertComponent.State.IDLE and cooldown <= 0.0 and not _is_reserved_for_expansion(unit):
+			var harvest := unit.get_component(HarvestComponent) as HarvestComponent
+			if alert != null and alert.role == AlertComponent.Role.BUILDER and alert.state == AlertComponent.State.IDLE and cooldown <= 0.0 and not _is_reserved_for_expansion(unit) and (harvest == null or harvest.can_start_construction()):
 				builders.append(unit)
 	return builders
 
@@ -450,6 +585,9 @@ func _create_construction_site(faction_index: int, position: Vector2) -> EnemySp
 	site.max_active_enemies = 0
 	site.builder_chance = 0.08
 	site.under_construction = true
+	# Construction is completed from the safe perimeter, not by forcing the
+	# worker into the building's solid collision footprint.
+	site.construction_presence_radius = 112.0
 	site.construction_max_health = building_health
 	var territory := faction["territory"] as Node2D
 	site.set_shared_territory_owner(territory)
@@ -552,6 +690,8 @@ func _enforce_builder_cap(source_building: EnemySpawnerBuilding) -> void:
 			if alert != null:
 				alert.set_role(AlertComponent.Role.PURSUER)
 				excess_builder.set("display_name", AlertComponent.get_role_name(alert.role))
+				var faction_color := Color("e45b61") if (excess_builder.get_component(TeamComponent) as TeamComponent).team == TeamComponent.Team.ENEMY else Color("63d8e2")
+				excess_builder.set("body_color", faction_color)
 				excess_builder.queue_redraw()
 		return
 

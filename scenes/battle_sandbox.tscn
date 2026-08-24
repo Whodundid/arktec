@@ -9,6 +9,7 @@
 [ext_resource type="Script" uid="uid://cypwhtaoofhqk" path="res://scripts/ui/selection_box.gd" id="7_selection"]
 [ext_resource type="Script" uid="uid://rovebwiek12j" path="res://scripts/ui/pause_menu.gd" id="8_pause"]
 [ext_resource type="Script" path="res://scripts/world/entity_spatial_index.gd" id="9_spatial_index"]
+[ext_resource type="Script" path="res://scripts/world/ore_field.gd" id="10_ore_field"]
 
 [node name="BattleSandbox" type="Node2D" unique_id=875574698]
 script = ExtResource("1_battle")
@@ -29,6 +30,9 @@ dynamic_path_reservation_radius = null
 
 [node name="World" type="Node2D" parent="." unique_id=2027433182]
 script = ExtResource("5_world")
+
+[node name="OreField" type="Node2D" parent="." unique_id=2027433183]
+script = ExtResource("10_ore_field")
 
 [node name="RTSCamera" type="Camera2D" parent="." unique_id=1010890298]
 zoom = Vector2(0.75, 0.75)

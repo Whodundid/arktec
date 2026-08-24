@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=14 format=3]
 
 [ext_resource type="Script" path="res://scripts/entities/character_entity.gd" id="1_character"]
 [ext_resource type="Script" path="res://scripts/entities/components/health_component.gd" id="3_health"]
@@ -10,6 +10,7 @@
 [ext_resource type="Script" path="res://scripts/entities/components/wander_component.gd" id="10_wander"]
 [ext_resource type="Script" path="res://scripts/entities/components/alert_component.gd" id="11_alert"]
 [ext_resource type="Script" path="res://scripts/entities/components/idle_look_component.gd" id="12_idle_look"]
+[ext_resource type="Script" path="res://scripts/entities/components/harvest_component.gd" id="13_harvest"]
 [ext_resource type="PackedScene" path="res://scenes/combat/ranged_projectile.tscn" id="8_projectile"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_character"]
@@ -49,6 +50,9 @@ script = ExtResource("10_wander")
 
 [node name="AlertComponent" type="Node" parent="."]
 script = ExtResource("11_alert")
+
+[node name="HarvestComponent" type="Node" parent="."]
+script = ExtResource("13_harvest")
 
 [node name="IdleLookComponent" type="Node" parent="."]
 script = ExtResource("12_idle_look")

@@ -79,10 +79,11 @@ func _process(delta: float) -> void:
 
 func _draw() -> void:
 	var size := get_viewport_rect().size
-	var performance_panel := Rect2(28, 28, 80, 54)
+	var performance_panel := Rect2(28, 28, 190, 54)
 	draw_style_box(_panel(Color("101b25"), Color("4d6f78")), performance_panel)
 	draw_string(small_font, performance_panel.position + Vector2(12, 22), "FPS: %3d" % Engine.get_frames_per_second(), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("dce5df"))
 	draw_string(small_font, performance_panel.position + Vector2(12, 42), "UPS: %3d" % _ups_value, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("9cb5b5"))
+	draw_string(small_font, performance_panel.position + Vector2(108, 22), "ORE: %d" % ResourceLedger.get_ore(TeamComponent.Team.PLAYER), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("f4d58b"))
 	var formation_text := "OFF"
 	var formation_controllers := get_tree().get_nodes_in_group("group_movement_controller")
 	if not formation_controllers.is_empty() and (formation_controllers[0] as GroupMovementController).is_formation_enabled():
@@ -105,6 +106,15 @@ func _draw() -> void:
 		if health != null:
 			var health_text := "HP %d / %d" % [roundi(health.current_health), roundi(health.maximum_health)]
 			draw_string(small_font, buttons[0].position + Vector2(0, -144), health_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("dce5df"))
+		var selected_team := selected_entity.get_component(TeamComponent) as TeamComponent
+		if selected_team != null:
+			var faction_ore := "FACTION ORE %d" % ResourceLedger.get_ore(selected_team.team)
+			draw_string(small_font, buttons[0].position + Vector2(148, -144), faction_ore, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("f4d58b"))
+		if selected_entity is EnemySpawnerBuilding:
+			var spawner := selected_entity as EnemySpawnerBuilding
+			if spawner.is_training():
+				var training_text := "TRAINING: %s %d%%" % [spawner.get_training_role_name(), roundi(spawner.get_training_progress() * 100.0)]
+				draw_string(small_font, buttons[0].position + Vector2(0, -124), training_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("7fb6df"))
 	_draw_ai_debug_panel(selected_entity, Rect2(buttons[0].position - Vector2(0, 140), Vector2(300, 108)))
 	var combat := _selected_combat()
 	if combat != null:

@@ -30,6 +30,8 @@ signal building_destroyed
 @export_range(32.0, 600.0, 1.0) var territory_radius := 180.0
 @export_range(32.0, 800.0, 1.0) var defense_alert_radius := 320.0
 @export_range(0.05, 1.0, 0.05) var defense_alert_cooldown := 0.25
+@export var training_cost := 25
+@export_range(1.0, 30.0, 0.5) var training_interval := 8.0
 
 var _active_enemies: Array[Entity] = []
 var _next_spawn_index := 0
@@ -38,6 +40,9 @@ var _random := RandomNumberGenerator.new()
 var _builder_spawned := false
 var shared_territory_owner: Node2D
 var _defense_alert_remaining := 0.0
+var _training_remaining := 0.0
+var _initial_spawn_complete := false
+var _training_role := -1
 
 func _ready() -> void:
 	super._ready()
@@ -56,6 +61,26 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	super._physics_process(delta)
 	_defense_alert_remaining = maxf(_defense_alert_remaining - delta, 0.0)
+	if not is_simulation_authority() or _destroyed or under_construction or not _initial_spawn_complete:
+		return
+	if _active_enemies.size() >= max_active_enemies:
+		_training_remaining = 0.0
+		_training_role = -1
+		return
+	if _training_role < 0:
+		_training_role = _choose_training_role()
+		_training_remaining = training_interval
+		queue_redraw()
+	else:
+		_training_remaining = maxf(_training_remaining - delta, 0.0)
+		queue_redraw()
+		if _training_remaining <= 0.0:
+			if _spawn_enemy(_training_role):
+				_training_role = -1
+			else:
+				# Keep the queued unit type visible, but avoid retrying every physics
+				# frame while the faction is short on ore.
+				_training_remaining = 1.0
 
 func _spawn_initial_enemies() -> void:
 	if not is_simulation_authority():
@@ -68,24 +93,32 @@ func _spawn_initial_enemies() -> void:
 		else:
 			var timer := get_tree().create_timer(_random.randf_range(0.0, initial_spawn_jitter), false)
 			timer.timeout.connect(_spawn_enemy)
+	_initial_spawn_complete = true
 
-func _spawn_enemy() -> void:
+func _spawn_enemy(role_override: int = -1) -> bool:
 	if not is_simulation_authority():
-		return
+		return false
 	if _destroyed or enemy_scene == null or _active_enemies.size() >= max_active_enemies:
-		return
+		return false
+	if not ResourceLedger.spend_ore(faction_team, training_cost):
+		return false
 	var enemy := enemy_scene.instantiate() as Entity
 	if enemy == null:
-		return
+		ResourceLedger.add_ore(faction_team, training_cost)
+		return false
+	var spawn_position: Variant = _find_spawn_position(enemy)
+	if not spawn_position is Vector2:
+		# Keep the ore reserved for the queued unit. The next training tick will
+		# try again after the local area has become available.
+		ResourceLedger.add_ore(faction_team, training_cost)
+		enemy.queue_free()
+		return false
 	var spawn_index := _next_spawn_index
-	var assigned_role := spawn_index % 3
-	if guarantee_builder and not _builder_spawned:
-		assigned_role = AlertComponent.Role.BUILDER
+	var assigned_role := role_override if role_override >= 0 else _choose_training_role()
+	if guarantee_builder and assigned_role == AlertComponent.Role.BUILDER:
 		_builder_spawned = true
-	elif _random.randf() < builder_chance:
-		assigned_role = AlertComponent.Role.BUILDER
 	get_tree().current_scene.add_child(enemy)
-	enemy.global_position = global_position + spawn_positions[_next_spawn_index % spawn_positions.size()]
+	enemy.global_position = spawn_position as Vector2
 	_next_spawn_index += 1
 	enemy.set("display_name", AlertComponent.get_role_name(assigned_role))
 	var faction_color := Color("e45b61") if faction_team == TeamComponent.Team.ENEMY else Color("63d8e2")
@@ -119,6 +152,51 @@ func _spawn_enemy() -> void:
 		health.died.connect(_on_enemy_died.bind(enemy))
 	_active_enemies.append(enemy)
 	enemy_spawned.emit(enemy)
+	return true
+
+func _find_spawn_position(unit: Entity) -> Variant:
+	# Try the authored points first, then expand in a small ring around the
+	# building. The search is intentionally capped so a blocked spawner never
+	# teleports a new unit to a distant part of the map.
+	var candidates: Array[Vector2] = []
+	for offset_value in spawn_positions:
+		if offset_value is Vector2:
+			candidates.append(global_position + (offset_value as Vector2))
+	for distance in [64.0, 80.0, 96.0, 112.0]:
+		for direction_index in range(8):
+			var angle := float(direction_index) * TAU / 8.0
+			candidates.append(global_position + Vector2.RIGHT.rotated(angle) * distance)
+
+	var terrain_map := _find_terrain_map()
+	for candidate in candidates:
+		if terrain_map != null:
+			var candidate_cell := terrain_map.world_to_cell(candidate)
+			if not terrain_map.is_inside(candidate_cell) or not terrain_map.is_traversable(terrain_map.get_tile(candidate_cell)):
+				continue
+		if _is_spawn_position_clear(candidate, unit.collision_radius + unit.collision_leeway):
+			return candidate
+	return null
+
+func _is_spawn_position_clear(candidate: Vector2, clearance: float) -> bool:
+	var shape := CircleShape2D.new()
+	shape.radius = clearance
+	var query := PhysicsShapeQueryParameters2D.new()
+	query.shape = shape
+	query.transform = Transform2D(0.0, candidate)
+	query.collision_mask = 1 | (1 << 3) # Terrain plus solid structures.
+	return get_world_2d().direct_space_state.intersect_shape(query, 1).is_empty()
+
+func _find_terrain_map() -> TerrainMap:
+	var maps := get_tree().get_nodes_in_group("terrain_maps")
+	return null if maps.is_empty() else maps[0] as TerrainMap
+
+func _choose_training_role() -> int:
+	var role := _next_spawn_index % 3
+	if guarantee_builder and not _builder_spawned:
+		return AlertComponent.Role.BUILDER
+	if _random.randf() < builder_chance:
+		return AlertComponent.Role.BUILDER
+	return role
 
 func _on_enemy_died(enemy: Entity) -> void:
 	_active_enemies.erase(enemy)
@@ -129,8 +207,9 @@ func _on_enemy_died(enemy: Entity) -> void:
 	if _destroyed:
 		return
 	var delay := maxf(0.1, respawn_delay + _random.randf_range(-respawn_jitter, respawn_jitter))
-	var timer := get_tree().create_timer(delay, false)
-	timer.timeout.connect(_spawn_enemy)
+	_training_remaining = minf(_training_remaining, delay) if _training_remaining > 0.0 else delay
+	if _training_role < 0:
+		_training_role = _choose_training_role()
 
 func _on_building_died() -> void:
 	_destroyed = true
@@ -208,6 +287,11 @@ func get_active_enemies() -> Array[Entity]:
 func set_shared_territory_owner(owner: Node2D) -> void:
 	shared_territory_owner = owner
 
+func contains_territory_position(position: Vector2) -> bool:
+	if is_instance_valid(shared_territory_owner) and shared_territory_owner.has_method("contains_position"):
+		return bool(shared_territory_owner.call("contains_position", position))
+	return global_position.distance_to(position) <= territory_radius
+
 func set_construction_progress(value: float) -> void:
 	construction_progress = clampf(value, 0.0, 1.0)
 	var health := get_component(HealthComponent) as HealthComponent
@@ -225,8 +309,21 @@ func complete_construction(unit_count: int) -> void:
 	set_construction_progress(1.0)
 	under_construction = false
 	max_active_enemies = maxi(unit_count, 1)
+	_initial_spawn_complete = true
+	_training_remaining = training_interval
+	_training_role = _choose_training_role()
 	queue_redraw()
-	call_deferred("_spawn_initial_enemies")
+
+func is_training() -> bool:
+	return _initial_spawn_complete and not under_construction and _active_enemies.size() < max_active_enemies and _training_role >= 0
+
+func get_training_progress() -> float:
+	if not is_training():
+		return 0.0
+	return clampf(1.0 - _training_remaining / maxf(training_interval, 0.1), 0.0, 1.0)
+
+func get_training_role_name() -> String:
+	return "None" if _training_role < 0 else AlertComponent.get_role_name(_training_role)
 
 func _draw() -> void:
 	var faction_color := Color("e45b61") if faction_team == TeamComponent.Team.ENEMY else Color("63d8e2")
@@ -243,5 +340,10 @@ func _draw() -> void:
 		draw_rect(progress_bar, Color("17242b"), true)
 		draw_rect(Rect2(progress_bar.position, Vector2(progress_bar.size.x * construction_progress, progress_bar.size.y)), Color("f4d58b"), true)
 		draw_rect(progress_bar, Color("f4d58b"), false, 1.0)
+	elif is_training():
+		var training_bar := Rect2(-30.0, -38.0, 60.0, 6.0)
+		draw_rect(training_bar, Color("17242b"), true)
+		draw_rect(Rect2(training_bar.position, Vector2(training_bar.size.x * get_training_progress(), training_bar.size.y)), Color("7fb6df"), true)
+		draw_rect(training_bar, Color("7fb6df"), false, 1.0)
 	var label := "Constructing" if under_construction else faction_name
 	draw_string(ThemeDB.fallback_font, Vector2(-70, 48), label, HORIZONTAL_ALIGNMENT_CENTER, 140, 12, faction_color.lightened(0.25))

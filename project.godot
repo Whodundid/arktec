@@ -21,6 +21,7 @@ config/features=PackedStringArray("4.7", "GL Compatibility")
 [autoload]
 
 NetworkSession="*res://scripts/network/network_session.gd"
+ResourceLedger="*res://scripts/economy/resource_ledger.gd"
 
 [display]
 

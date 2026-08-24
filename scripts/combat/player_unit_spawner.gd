@@ -7,6 +7,7 @@ extends Node2D
 @export var spawn_origin := Vector2(-120, 190)
 @export var spawn_spacing := 30.0
 @export var speed_cycle := [2.0, 2.5, 3.0, 3.5]
+@export var training_cost := 25
 
 var _next_spawn_index := 0
 var _spawned_units: Array[Entity] = []
@@ -30,10 +31,13 @@ func _unhandled_input(event: InputEvent) -> void:
 func spawn_unit() -> Entity:
 	if not NetworkSession.is_simulation_authority():
 		return null
+	if not ResourceLedger.spend_ore(TeamComponent.Team.PLAYER, training_cost):
+		return null
 	if unit_scene == null:
 		return null
 	var unit := unit_scene.instantiate() as Entity
 	if unit == null:
+		ResourceLedger.add_ore(TeamComponent.Team.PLAYER, training_cost)
 		return null
 	var row := _next_spawn_index / 3
 	var column := _next_spawn_index % 3

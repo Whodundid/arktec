@@ -42,6 +42,10 @@ var construction_active := false
 func set_construction_active(active: bool) -> void:
 	construction_active = active
 	if active:
+		var harvest := entity.get_component(HarvestComponent) as HarvestComponent
+		if harvest != null:
+			harvest.cancel_harvest_action()
+		entity.set_action_state(Entity.ActionState.CONSTRUCTING)
 		_attacker = null
 		state = State.IDLE
 		if _movement != null:
@@ -51,6 +55,8 @@ func set_construction_active(active: bool) -> void:
 		if _combat != null:
 			_combat.set_auto_target_mode(CombatComponent.AUTO_HOLD_POSITION)
 	else:
+		if entity.action_state == Entity.ActionState.CONSTRUCTING:
+			entity.set_action_state(Entity.ActionState.IDLE)
 		if _wander != null:
 			_wander.enabled = true
 		if _combat != null:
@@ -174,6 +180,8 @@ func _on_attacked(attacker: Entity) -> void:
 	if construction_active:
 		return
 	if role == Role.BUILDER:
+		_request_faction_defense(attacker)
+		_broadcast_alert(attacker)
 		_begin_return()
 		return
 	if _is_low_health():
@@ -181,6 +189,12 @@ func _on_attacked(attacker: Entity) -> void:
 		return
 	_broadcast_alert(attacker)
 	_respond_to_alert(attacker, attacker.global_position)
+
+func _request_faction_defense(attacker: Entity) -> void:
+	var sandboxes := get_tree().get_nodes_in_group("battle_sandboxes")
+	if sandboxes.is_empty():
+		return
+	sandboxes[0].call("request_worker_defense", entity, attacker)
 
 func _on_health_changed(current_health: float, maximum_health: float) -> void:
 	if maximum_health <= 0.0 or current_health / maximum_health > retreat_health_ratio:
