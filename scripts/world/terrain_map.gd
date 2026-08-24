@@ -19,8 +19,26 @@ enum TileType {
 @export var rows := 16
 @export var tile_size := 64.0
 @export var map_origin := Vector2(-896.0, -512.0)
-@export var draw_grid := true
+## Optional debug overlay; keep the shipped terrain free of cell outlines.
+@export var draw_grid := false
+## Kept as a compatibility/debug toggle for the pause menu. When disabled,
+## terrain renders as flat colors instead of atlas textures.
 @export var draw_tile_details := true
+## Small 2.5D front lip that gives each tile a little visual volume.
+## Disabled by default until terrain height/edge rules are available; applying
+## it uniformly makes the map read as a grid instead of raised terrain.
+@export var draw_tile_depth := false
+@export_range(0.0, 12.0, 0.5) var tile_depth := 3.0
+
+const TILE_SHEET_CELL_SIZE := 32
+
+const TILE_SHEET_REGIONS := {
+	# (1, 3) is the clean diagonal grass tile highlighted in the atlas.
+	TileType.GRASS: [Vector2i(1, 3)],
+	TileType.STONE: [Vector2i(2, 4)],
+	TileType.DIRT: [Vector2i(0, 5)],
+	TileType.WATER: [Vector2i(2, 5)],
+}
 
 const TILE_COLORS := {
 	TileType.GRASS: Color("4d7c59"),
@@ -51,9 +69,14 @@ const STRUCTURE_LAYER := 4
 var tiles: Array[Array] = []
 var _collision_root: Node2D
 var _navigation_grid := AStarGrid2D.new()
+var _tile_sheet: Texture2D
 
 func _ready() -> void:
 	add_to_group("terrain_maps")
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	var tile_sheet_path := "res://assets/art/SPRITE_SHEET_1.png"
+	if ResourceLoader.exists(tile_sheet_path):
+		_tile_sheet = load(tile_sheet_path) as Texture2D
 	_build_test_map()
 	_build_navigation_grid()
 	if not Engine.is_editor_hint():
@@ -185,43 +208,60 @@ func _draw() -> void:
 			var cell := Vector2i(x, y)
 			var tile_type: int = tiles[y][x]
 			var rect := Rect2(cell_to_world(cell), Vector2.ONE * tile_size)
-			draw_rect(rect, tile_color(tile_type), true)
 			if draw_tile_details:
-				draw_tile_detail(cell, rect, tile_type)
+				draw_tile_texture(cell, rect, tile_type)
+			else:
+				draw_rect(rect, tile_color(tile_type), true)
+			if draw_tile_depth and tile_depth > 0.0:
+				draw_tile_depth_edge(rect, tile_type)
 			if draw_grid:
 				draw_rect(rect, Color(0.06, 0.09, 0.10, 0.28), false, 1.0)
 
-func draw_tile_detail(cell: Vector2i, rect: Rect2, tile_type: int) -> void:
-	# Keep decoration deterministic so editor redraws and multiplayer clients
-	# see the same terrain without storing any extra tile state.
+func draw_tile_depth_edge(rect: Rect2, tile_type: int) -> void:
+	# This is a deliberately small 2.5D cue: a dark L-shaped front/right lip
+	# makes the otherwise flat atlas tiles read as shallow raised slabs.
+	var depth_color := Color(0.03, 0.04, 0.045, 0.22)
+	if tile_type == TileType.WATER:
+		depth_color = Color(0.01, 0.02, 0.05, 0.16)
+	var edge := minf(tile_depth, rect.size.x * 0.12)
+	var points := PackedVector2Array([
+		rect.position + Vector2(0.0, rect.size.y - edge),
+		rect.position + Vector2(rect.size.x, rect.size.y - edge),
+		rect.position + Vector2(rect.size.x, rect.size.y),
+		rect.position + Vector2(rect.size.x - edge, rect.size.y),
+		rect.position + Vector2(rect.size.x - edge, rect.size.y - edge),
+		rect.position + Vector2(0.0, rect.size.y),
+	])
+	draw_colored_polygon(points, depth_color)
+
+func draw_tile_texture(cell: Vector2i, rect: Rect2, tile_type: int) -> void:
+	var regions: Array = TILE_SHEET_REGIONS.get(tile_type, [])
+	if _tile_sheet == null or regions.is_empty():
+		draw_rect(rect, tile_color(tile_type), true)
+		return
+
+	# The cell hash makes atlas selection and orientation stable across redraws
+	# and multiplayer peers without storing another value for every terrain tile.
 	var seed_value := absi(cell.x * 92821 + cell.y * 68917 + tile_type * 31337)
-	var center := rect.position + rect.size * 0.5
-	match tile_type:
-		TileType.GRASS:
-			for index in range(2):
-				var offset := Vector2(
-					float((seed_value >> (index * 3)) % 38) - 19.0,
-					float((seed_value >> (index * 5 + 2)) % 34) - 17.0
-				)
-				var blade_base := center + offset
-				draw_line(blade_base, blade_base + Vector2(-2.0, -5.0), Color(0.20, 0.38, 0.25, 0.28), 1.0)
-				draw_line(blade_base, blade_base + Vector2(2.0, -4.0), Color(0.26, 0.45, 0.29, 0.22), 1.0)
-		TileType.DIRT:
-			var line_color := Color(0.35, 0.22, 0.15, 0.24)
-			for index in range(2):
-				var y_offset := float((seed_value >> (index * 4)) % 30) - 15.0
-				var x_offset := float((seed_value >> (index * 6 + 1)) % 18) - 9.0
-				draw_line(center + Vector2(-22.0 + x_offset, y_offset), center + Vector2(12.0 + x_offset, y_offset + 2.0), line_color, 1.0)
-		TileType.STONE:
-			var crack_color := Color(0.25, 0.29, 0.31, 0.42)
-			var crack_start := center + Vector2(float(seed_value % 20) - 10.0, -8.0)
-			draw_line(crack_start, crack_start + Vector2(-7.0, 7.0), crack_color, 1.0)
-			draw_line(crack_start + Vector2(-7.0, 7.0), crack_start + Vector2(2.0, 13.0), crack_color, 1.0)
-		TileType.WATER:
-			var ripple_color := Color(0.42, 0.73, 0.78, 0.28)
-			var ripple_offset := float(seed_value % 18) - 9.0
-			draw_line(center + Vector2(-21.0, ripple_offset), center + Vector2(-5.0, ripple_offset - 1.0), ripple_color, 1.0)
-			draw_line(center + Vector2(5.0, ripple_offset + 5.0), center + Vector2(22.0, ripple_offset + 4.0), ripple_color, 1.0)
+	var atlas_cell: Vector2i = regions[seed_value % regions.size()]
+	var rotation_index := 0
+	var flip_x := false
+	var flip_y := false
+	if tile_type != TileType.WATER and tile_type != TileType.GRASS:
+		rotation_index = (seed_value / maxi(1, regions.size())) % 4
+		flip_x = ((seed_value / 7) % 2) == 1
+		flip_y = ((seed_value / 11) % 2) == 1
+	var scale := Vector2(-1.0 if flip_x else 1.0, -1.0 if flip_y else 1.0)
+	var angle := float(rotation_index) * TAU / 4.0
+	var source_rect := Rect2(Vector2(atlas_cell) * TILE_SHEET_CELL_SIZE, Vector2.ONE * TILE_SHEET_CELL_SIZE)
+
+	draw_set_transform(rect.get_center(), angle, scale)
+	draw_texture_rect_region(
+		_tile_sheet,
+		Rect2(-rect.size * 0.5, rect.size),
+		source_rect
+	)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 func cell_to_world(cell: Vector2i) -> Vector2:
 	return map_origin + Vector2(cell) * tile_size
