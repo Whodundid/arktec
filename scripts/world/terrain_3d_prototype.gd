@@ -20,9 +20,14 @@ enum TileType {
 @export var camera_distance := 24.0
 @export var camera_height := 20.0
 @export var camera_size := 18.0
+@export var camera_pan_speed := 8.0
+@export var camera_edge_pan_speed := 16.0
+@export_range(0.0, 64.0, 1.0) var camera_edge_size := 24.0
 
 const TILE_SHEET_PATH := "res://assets/art/SPRITE_SHEET_1.png"
 const SIGNPOST_UNIT_SCENE := preload("res://scenes/entities/signpost_unit_3d.tscn")
+const PROJECTILE_3D_SCENE := preload("res://scenes/combat/projectile_3d.tscn")
+const SELECTION_BOX_SCRIPT := preload("res://scripts/ui/selection_box_3d.gd")
 const TILE_SHEET_CELL_SIZE := 32.0
 const FALLBACK_SHEET_SIZE := Vector2(320.0, 320.0)
 
@@ -50,6 +55,12 @@ var _status_label: Label
 var _interaction_status := "Click the signpost to select it"
 var _navigation_grid := AStarGrid2D.new()
 var _unit: SignpostUnit3D
+var _units: Array[SignpostUnit3D] = []
+var _attack_move_armed := false
+var _movement_marker: Node3D
+var _movement_marker_unit: SignpostUnit3D
+var _movement_marker_finish_remaining := 0.0
+var _mouse_confined := true
 
 func _ready() -> void:
 	if ResourceLoader.exists(TILE_SHEET_PATH):
@@ -63,17 +74,38 @@ func _ready() -> void:
 	_build_camera()
 	_build_signpost_unit()
 	_build_overlay()
+	_set_mouse_confined(true)
 	_update_camera()
 
 func _process(delta: float) -> void:
-	var input_direction := Input.get_vector("camera_left", "camera_right", "camera_up", "camera_down")
-	if input_direction == Vector2.ZERO:
+	_update_combat(delta)
+	_update_movement_marker(delta)
+	var keyboard_direction := Input.get_vector("camera_left", "camera_right", "camera_up", "camera_down")
+	var edge_direction := Vector2.ZERO
+	if not _dragging_camera and camera_edge_size > 0.0:
+		var viewport_size := get_viewport().get_visible_rect().size
+		var mouse_position := get_viewport().get_mouse_position()
+		if mouse_position.x <= camera_edge_size:
+			edge_direction.x -= 1.0
+		elif mouse_position.x >= viewport_size.x - camera_edge_size:
+			edge_direction.x += 1.0
+		if mouse_position.y <= camera_edge_size:
+			edge_direction.y -= 1.0
+		elif mouse_position.y >= viewport_size.y - camera_edge_size:
+			edge_direction.y += 1.0
+	if keyboard_direction == Vector2.ZERO and edge_direction == Vector2.ZERO:
 		return
 
 	var camera_outward := Vector3(cos(_camera_yaw), 0.0, sin(_camera_yaw))
-	var camera_right := Vector3(-camera_outward.z, 0.0, camera_outward.x)
-	var movement := camera_right * input_direction.x + camera_outward * input_direction.y
-	_camera_target += movement.normalized() * 8.0 * delta
+	var camera_right := Vector3(camera_outward.z, 0.0, -camera_outward.x)
+	var movement_velocity := Vector3.ZERO
+	if keyboard_direction != Vector2.ZERO:
+		var keyboard_movement := camera_right * keyboard_direction.x + camera_outward * keyboard_direction.y
+		movement_velocity += keyboard_movement.normalized() * camera_pan_speed
+	if edge_direction != Vector2.ZERO:
+		var edge_movement := camera_right * edge_direction.x + camera_outward * edge_direction.y
+		movement_velocity += edge_movement.normalized() * camera_edge_pan_speed
+	_camera_target += movement_velocity * delta
 	_camera_target.x = clampf(_camera_target.x, -float(columns) * 0.5, float(columns) * 0.5)
 	_camera_target.z = clampf(_camera_target.z, -float(rows) * 0.5, float(rows) * 0.5)
 	_update_camera()
@@ -344,11 +376,23 @@ func _build_camera() -> void:
 	add_child(_camera)
 
 func _build_signpost_unit() -> void:
-	_unit = SIGNPOST_UNIT_SCENE.instantiate() as SignpostUnit3D
-	_unit.name = "MercenarySignpost"
-	add_child(_unit)
-	var spawn_cell := Vector2i(4, 10)
-	_unit.position = _cell_to_world_top(spawn_cell)
+	_unit = _spawn_signpost("Mercenary", SignpostUnit3D.Team.PLAYER, Vector2i(4, 10))
+	_spawn_signpost("Red Guard", SignpostUnit3D.Team.ENEMY, Vector2i(11, 10))
+	_spawn_signpost("Red Pursuer", SignpostUnit3D.Team.ENEMY, Vector2i(24, 4))
+	_spawn_signpost("Red Flanker", SignpostUnit3D.Team.ENEMY, Vector2i(22, 14))
+
+func _spawn_signpost(unit_name: String, team: int, spawn_cell: Vector2i) -> SignpostUnit3D:
+	var signpost := SIGNPOST_UNIT_SCENE.instantiate() as SignpostUnit3D
+	signpost.name = unit_name.replace(" ", "") + "Signpost"
+	signpost.display_name = unit_name
+	signpost.team = team
+	if team == SignpostUnit3D.Team.ENEMY:
+		signpost.order_mode = SignpostUnit3D.OrderMode.HOLD_POSITION
+	add_child(signpost)
+	signpost.position = _cell_to_world_top(spawn_cell)
+	signpost.died.connect(_on_unit_died)
+	_units.append(signpost)
+	return signpost
 
 func _update_camera() -> void:
 	if _camera == null:
@@ -363,12 +407,18 @@ func _update_camera() -> void:
 
 func _refresh_status() -> void:
 	if _status_label != null:
-		_status_label.text = "3D BLOCK TERRAIN PROTOTYPE\nWASD/arrows: pan    Q/E or middle-drag: rotate    Wheel: zoom    R: reset\nLeft-click: select/move    Camera: %d degrees    %s" % [roundi(rad_to_deg(_camera_yaw)), _interaction_status]
+		_status_label.text = "3D BLOCK TERRAIN PROTOTYPE\nArrows/screen edges: pan    Q/E or middle-drag: rotate    Wheel: zoom    R: reset\nLeft-click: select/A-move    Right-click: context move    A: attack-move    H: hold    F10: confine mouse    F11: fullscreen    Camera: %d\n%s" % [roundi(rad_to_deg(_camera_yaw)), _interaction_status]
 
 func _build_overlay() -> void:
 	var canvas := CanvasLayer.new()
 	canvas.name = "PrototypeHUD"
 	add_child(canvas)
+
+	var selection_box := SELECTION_BOX_SCRIPT.new()
+	selection_box.name = "SelectionBox"
+	selection_box.controller = self
+	canvas.add_child(selection_box)
+	selection_box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	var panel := PanelContainer.new()
 	panel.position = Vector2(18.0, 18.0)
@@ -379,52 +429,367 @@ func _build_overlay() -> void:
 	_status_label.add_theme_font_size_override("font_size", 16)
 	panel.add_child(_status_label)
 
+func _show_movement_marker(unit: SignpostUnit3D, destination: Vector3, color: Color) -> void:
+	_clear_movement_marker()
+	_movement_marker = Node3D.new()
+	_movement_marker.name = "MovementDestinationMarker"
+	_movement_marker.position = destination + Vector3(0.0, 0.055, 0.0)
+	add_child(_movement_marker)
+
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(
+		0.018 + color.r * 0.055,
+		0.024 + color.g * 0.055,
+		0.028 + color.b * 0.055,
+		0.94
+	)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.31
+	torus.outer_radius = 0.38
+	torus.rings = 32
+	torus.ring_segments = 8
+	ring.mesh = torus
+	ring.material_override = material
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_movement_marker.add_child(ring)
+
+	for size in [Vector3(0.92, 0.025, 0.055), Vector3(0.055, 0.025, 0.92)]:
+		var cross_bar := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = size
+		cross_bar.mesh = box
+		cross_bar.material_override = material
+		cross_bar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_movement_marker.add_child(cross_bar)
+
+	_movement_marker_unit = unit
+	_movement_marker_finish_remaining = 0.55
+
+func _update_movement_marker(delta: float) -> void:
+	if not is_instance_valid(_movement_marker):
+		return
+	var pulse := 1.0 + sin(Time.get_ticks_msec() * 0.008) * 0.08
+	_movement_marker.scale = Vector3.ONE * pulse
+	if is_instance_valid(_movement_marker_unit) and _movement_marker_unit.has_pending_path():
+		_movement_marker_finish_remaining = 0.55
+		return
+	_movement_marker_finish_remaining -= delta
+	if _movement_marker_finish_remaining <= 0.0:
+		_clear_movement_marker()
+
+func _clear_movement_marker() -> void:
+	if is_instance_valid(_movement_marker):
+		_movement_marker.queue_free()
+	_movement_marker = null
+	_movement_marker_unit = null
+	_movement_marker_finish_remaining = 0.0
+
 func _handle_left_click(screen_position: Vector2) -> void:
 	if _unit == null or _camera == null:
 		return
 
-	var unit_screen_position := _camera.unproject_position(_unit.global_position + Vector3(0.0, 0.78, 0.0))
-	if unit_screen_position.distance_to(screen_position) <= 42.0:
+	if _attack_move_armed and _unit.selected:
+		var attack_target := _find_unit_at_screen(screen_position, SignpostUnit3D.Team.ENEMY)
+		_attack_move_armed = false
+		if attack_target != null:
+			_issue_explicit_attack(_unit, attack_target)
+			return
+		var attack_destination = _screen_to_world(screen_position)
+		if attack_destination is Vector3:
+			_issue_attack_move(_unit, attack_destination as Vector3)
+		return
+
+	var clicked_player := _find_unit_at_screen(screen_position, SignpostUnit3D.Team.PLAYER)
+	if clicked_player == _unit:
 		_unit.set_selected(true)
 		_interaction_status = "%s selected" % _unit.display_name
 		_refresh_status()
 		return
 
-	if not _unit.selected:
-		_interaction_status = "Select the signpost before issuing a move"
+	_interaction_status = "Use right-click to move, or press A then left-click"
+	_refresh_status()
+
+func _select_units_in_screen_rect(selection_rect: Rect2) -> void:
+	_attack_move_armed = false
+	var selected_count := 0
+	for candidate in _units:
+		if not is_instance_valid(candidate) or candidate.team != SignpostUnit3D.Team.PLAYER:
+			continue
+		var screen_position := _camera.unproject_position(candidate.global_position + Vector3(0.0, 0.78, 0.0))
+		var selected := selection_rect.has_point(screen_position)
+		candidate.set_selected(selected)
+		if selected:
+			selected_count += 1
+	_interaction_status = "%d player signpost%s selected" % [selected_count, "" if selected_count == 1 else "s"]
+	_refresh_status()
+
+func _handle_right_click(screen_position: Vector2) -> void:
+	if _unit == null or not _unit.selected:
+		_interaction_status = "Select the player signpost first"
 		_refresh_status()
 		return
+	_attack_move_armed = false
+	var attack_target := _find_unit_at_screen(screen_position, SignpostUnit3D.Team.ENEMY)
+	if attack_target != null:
+		_issue_explicit_attack(_unit, attack_target)
+		return
+	var destination = _screen_to_world(screen_position)
+	if destination is Vector3:
+		_issue_manual_move(_unit, destination as Vector3)
 
+func _screen_to_world(screen_position: Vector2) -> Variant:
 	var ray_origin := _camera.project_ray_origin(screen_position)
 	var ray_direction := _camera.project_ray_normal(screen_position)
 	var ground_plane := Plane(Vector3.UP, 0.0)
-	var intersection = ground_plane.intersects_ray(ray_origin, ray_direction)
-	if intersection == null:
-		return
+	return ground_plane.intersects_ray(ray_origin, ray_direction)
 
-	var goal_cell := _world_to_cell(intersection)
-	if not _is_inside(goal_cell) or not _is_traversable(_tiles[goal_cell.y][goal_cell.x]):
-		_interaction_status = "That block is not traversable"
-		_refresh_status()
-		return
+func _find_unit_at_screen(screen_position: Vector2, desired_team: int) -> SignpostUnit3D:
+	var closest: SignpostUnit3D
+	var closest_distance := 44.0
+	for candidate in _units:
+		if not is_instance_valid(candidate) or candidate.team != desired_team:
+			continue
+		var candidate_screen := _camera.unproject_position(candidate.global_position + Vector3(0.0, 0.78, 0.0))
+		var distance := candidate_screen.distance_to(screen_position)
+		if distance < closest_distance:
+			closest = candidate
+			closest_distance = distance
+	return closest
 
-	var start_cell := _world_to_cell(_unit.global_position)
+func _issue_manual_move(unit: SignpostUnit3D, destination: Vector3) -> void:
+	unit.combat_target = null
+	unit.order_mode = SignpostUnit3D.OrderMode.MANUAL_MOVE
+	if _set_unit_path(unit, destination):
+		_show_movement_marker(unit, _destination_on_top(destination), unit.team_color())
+		_interaction_status = "RIGHT-CLICK MOVE: combat ignored while traveling"
+	else:
+		unit.order_mode = SignpostUnit3D.OrderMode.IDLE
+	_refresh_status()
+
+func _issue_attack_move(unit: SignpostUnit3D, destination: Vector3) -> void:
+	unit.combat_target = null
+	unit.order_mode = SignpostUnit3D.OrderMode.ATTACK_MOVE
+	unit.attack_move_destination = destination
+	if _set_unit_path(unit, destination):
+		_show_movement_marker(unit, _destination_on_top(destination), Color("d5a7df"))
+		_interaction_status = "ATTACK-MOVE: engaging enemies encountered en route"
+	else:
+		unit.order_mode = SignpostUnit3D.OrderMode.IDLE
+	_refresh_status()
+
+func _issue_hold_position(unit: SignpostUnit3D) -> void:
+	unit.stop_movement()
+	_clear_movement_marker()
+	unit.combat_target = null
+	unit.order_mode = SignpostUnit3D.OrderMode.HOLD_POSITION
+	_interaction_status = "HOLD POSITION: firing in range without chasing"
+	_refresh_status()
+
+func _issue_explicit_attack(unit: SignpostUnit3D, target: SignpostUnit3D) -> void:
+	unit.combat_target = target
+	unit.order_mode = SignpostUnit3D.OrderMode.ATTACK_TARGET
+	unit.set_movement_paused(false)
+	_show_movement_marker(unit, target.global_position, Color("e45b61"))
+	if not _can_attack(unit, target):
+		_set_unit_path(unit, target.global_position)
+	_interaction_status = "FOCUS FIRE: %s" % target.display_name
+	_refresh_status()
+
+func _set_unit_path(unit: SignpostUnit3D, destination: Vector3) -> bool:
+	var path := _find_world_path(unit.global_position, destination)
+	if path.is_empty():
+		unit.stop_movement()
+		_interaction_status = "No traversable route to that destination"
+		return false
+	unit.set_path(path)
+	return true
+
+func _destination_on_top(destination: Vector3) -> Vector3:
+	var cell := _world_to_cell(destination)
+	if not _is_inside(cell):
+		return destination
+	return Vector3(
+		destination.x,
+		_tile_height(_tiles[cell.y][cell.x], cell) + 0.02,
+		destination.z
+	)
+
+func _find_world_path(from_world: Vector3, to_world: Vector3) -> Array[Vector3]:
+	var path: Array[Vector3] = []
+	var start_cell := _world_to_cell(from_world)
+	var goal_cell := _world_to_cell(to_world)
+	if not _is_inside(start_cell) or not _is_inside(goal_cell):
+		return path
+	if not _is_traversable(_tiles[goal_cell.y][goal_cell.x]):
+		return path
+
 	var cell_path := _navigation_grid.get_id_path(start_cell, goal_cell)
 	if cell_path.is_empty():
-		_interaction_status = "No route to that block"
-		_refresh_status()
-		return
+		return path
 
-	var world_path: Array[Vector3] = []
+	var exact_destination := Vector3(
+		to_world.x,
+		_tile_height(_tiles[goal_cell.y][goal_cell.x], goal_cell) + 0.02,
+		to_world.z
+	)
+	var raw_points: Array[Vector3] = []
 	for index in range(1, cell_path.size()):
-		world_path.append(_cell_to_world_top(Vector2i(cell_path[index])))
-	_unit.set_path(world_path)
-	_interaction_status = "Moving %s to (%d, %d)" % [_unit.display_name, goal_cell.x, goal_cell.y]
+		raw_points.append(_cell_to_world_top(Vector2i(cell_path[index])))
+
+	# Greedily skip cell centers while a straight segment remains traversable.
+	# Open terrain therefore becomes one natural diagonal instead of a staircase.
+	var anchor := from_world
+	var raw_index := 0
+	while raw_index < raw_points.size():
+		var farthest := raw_index
+		for probe in range(raw_index, raw_points.size()):
+			if not _grid_segment_is_clear(anchor, raw_points[probe]):
+				break
+			farthest = probe
+		path.append(raw_points[farthest])
+		anchor = raw_points[farthest]
+		raw_index = farthest + 1
+
+	if path.is_empty() or path.back().distance_to(exact_destination) > 0.025:
+		path.append(exact_destination)
+	else:
+		path[path.size() - 1] = exact_destination
+	return path
+
+func _grid_segment_is_clear(from_world: Vector3, to_world: Vector3) -> bool:
+	var planar_distance := Vector2(from_world.x, from_world.z).distance_to(Vector2(to_world.x, to_world.z))
+	var steps := maxi(1, ceili(planar_distance / 0.18))
+	for index in range(steps + 1):
+		var sample := from_world.lerp(to_world, float(index) / float(steps))
+		var cell := _world_to_cell(sample)
+		if not _is_inside(cell) or not _is_traversable(_tiles[cell.y][cell.x]):
+			return false
+	return true
+
+func _update_combat(_delta: float) -> void:
+	for unit in _units:
+		if not is_instance_valid(unit) or not unit.is_alive():
+			continue
+		if not is_instance_valid(unit.combat_target) or not unit.combat_target.is_alive():
+			unit.combat_target = null
+
+		match unit.order_mode:
+			SignpostUnit3D.OrderMode.MANUAL_MOVE:
+				if not unit.has_pending_path():
+					unit.order_mode = SignpostUnit3D.OrderMode.IDLE
+				continue
+			SignpostUnit3D.OrderMode.HOLD_POSITION:
+				unit.stop_movement()
+				if unit.combat_target == null:
+					unit.combat_target = _acquire_nearest_target(unit)
+			SignpostUnit3D.OrderMode.ATTACK_MOVE:
+				if unit.combat_target == null:
+					unit.combat_target = _acquire_nearest_target(unit)
+				if unit.combat_target == null:
+					unit.set_movement_paused(false)
+					if not unit.has_pending_path():
+						unit.order_mode = SignpostUnit3D.OrderMode.IDLE
+					continue
+			SignpostUnit3D.OrderMode.ATTACK_TARGET:
+				if unit.combat_target == null:
+					unit.order_mode = SignpostUnit3D.OrderMode.IDLE
+					unit.set_movement_paused(false)
+					continue
+			SignpostUnit3D.OrderMode.IDLE:
+				if unit.combat_target == null:
+					unit.combat_target = _acquire_nearest_target(unit)
+
+		var target := unit.combat_target
+		if target == null:
+			continue
+		if _can_attack(unit, target):
+			unit.set_movement_paused(true)
+			_fire_if_ready(unit, target)
+		elif unit.order_mode == SignpostUnit3D.OrderMode.ATTACK_TARGET:
+			unit.set_movement_paused(false)
+			if not unit.has_pending_path():
+				_set_unit_path(unit, target.global_position)
+		else:
+			unit.combat_target = null
+			unit.set_movement_paused(false)
+
+func _acquire_nearest_target(unit: SignpostUnit3D) -> SignpostUnit3D:
+	var closest: SignpostUnit3D
+	var closest_distance := INF
+	for candidate in _units:
+		if not is_instance_valid(candidate) or candidate == unit or candidate.team == unit.team or not candidate.is_alive():
+			continue
+		var distance := _planar_distance(unit.global_position, candidate.global_position)
+		if distance > unit.attack_range or distance >= closest_distance:
+			continue
+		if not _has_combat_line_of_sight(unit.global_position, candidate.global_position):
+			continue
+		closest = candidate
+		closest_distance = distance
+	return closest
+
+func _can_attack(unit: SignpostUnit3D, target: SignpostUnit3D) -> bool:
+	return (
+		is_instance_valid(target)
+		and target.is_alive()
+		and target.team != unit.team
+		and _planar_distance(unit.global_position, target.global_position) <= unit.attack_range
+		and _has_combat_line_of_sight(unit.global_position, target.global_position)
+	)
+
+func _has_combat_line_of_sight(from_world: Vector3, to_world: Vector3) -> bool:
+	var distance := _planar_distance(from_world, to_world)
+	var steps := maxi(1, ceili(distance / 0.15))
+	for index in range(1, steps):
+		var sample := from_world.lerp(to_world, float(index) / float(steps))
+		var cell := _world_to_cell(sample)
+		if _is_inside(cell) and _tiles[cell.y][cell.x] == TileType.STONE:
+			return false
+	return true
+
+func _fire_if_ready(unit: SignpostUnit3D, target: SignpostUnit3D) -> void:
+	if unit.fire_cooldown > 0.0:
+		return
+	unit.fire_cooldown = unit.fire_interval
+	var projectile: Node3D = PROJECTILE_3D_SCENE.instantiate()
+	projectile.set("target", target)
+	projectile.set("damage", unit.attack_damage)
+	projectile.set("projectile_color", unit.team_color())
+	add_child(projectile)
+	projectile.global_position = unit.global_position + Vector3(0.0, 0.84, 0.0)
+
+func _planar_distance(first: Vector3, second: Vector3) -> float:
+	return Vector2(first.x, first.z).distance_to(Vector2(second.x, second.z))
+
+func _on_unit_died(dead_unit: SignpostUnit3D) -> void:
+	_units.erase(dead_unit)
+	for unit in _units:
+		if is_instance_valid(unit) and unit.combat_target == dead_unit:
+			unit.combat_target = null
+	if dead_unit == _unit:
+		_interaction_status = "Player signpost destroyed"
+	else:
+		_interaction_status = "%s destroyed" % dead_unit.display_name
 	_refresh_status()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.physical_keycode:
+			KEY_A:
+				if _unit != null and _unit.selected:
+					_attack_move_armed = true
+					_interaction_status = "ATTACK-MOVE ARMED: left-click a destination"
+					_refresh_status()
+					get_viewport().set_input_as_handled()
+			KEY_H:
+				if _unit != null and _unit.selected:
+					_attack_move_armed = false
+					_issue_hold_position(_unit)
+					get_viewport().set_input_as_handled()
 			KEY_Q:
 				_camera_yaw -= deg_to_rad(15.0)
 				_update_camera()
@@ -439,9 +804,19 @@ func _unhandled_input(event: InputEvent) -> void:
 				_camera.size = camera_size
 				_update_camera()
 				get_viewport().set_input_as_handled()
+			KEY_F10:
+				_set_mouse_confined(not _mouse_confined)
+				get_viewport().set_input_as_handled()
+			KEY_F11:
+				var window_mode := DisplayServer.window_get_mode()
+				if window_mode == DisplayServer.WINDOW_MODE_FULLSCREEN or window_mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN:
+					DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+				else:
+					DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+				get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton:
-		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-			_handle_left_click(event.position)
+		if event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+			_handle_right_click(event.position)
 			get_viewport().set_input_as_handled()
 		elif event.button_index == MOUSE_BUTTON_MIDDLE:
 			_dragging_camera = event.pressed
@@ -452,10 +827,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_camera.size = minf(32.0, _camera.size + 1.0)
 			get_viewport().set_input_as_handled()
+
 	elif event is InputEventMouseMotion and _dragging_camera:
 		_camera_yaw += event.relative.x * 0.01
 		_update_camera()
 		get_viewport().set_input_as_handled()
+
+func _set_mouse_confined(confined: bool) -> void:
+	_mouse_confined = confined
+	Input.mouse_mode = Input.MOUSE_MODE_CONFINED if confined else Input.MOUSE_MODE_VISIBLE
+	_interaction_status = "Mouse confined to game window" if confined else "Mouse released"
+	_refresh_status()
 
 func _cell_to_world(cell: Vector2i, y_position: float = 0.0) -> Vector3:
 	return Vector3(
