@@ -28,7 +28,6 @@ func _draw() -> void:
 			draw_arc(attack_position, 30.0, 0.0, TAU, 32, attack_color, 3.0)
 			draw_line(attack_position - Vector2(38, 0), attack_position + Vector2(38, 0), attack_color, 2.0)
 			draw_line(attack_position - Vector2(0, 38), attack_position + Vector2(0, 38), attack_color, 2.0)
-			draw_string(ThemeDB.fallback_font, attack_position + Vector2(-32, -42), "ATTACK", HORIZONTAL_ALIGNMENT_CENTER, 64.0, 12, attack_color)
 		if group_controller.has_group_marker():
 			var group_destination: Vector2 = group_controller.get_group_destination()
 			var group_alpha := group_controller.get_group_marker_alpha()
