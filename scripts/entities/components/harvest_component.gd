@@ -62,6 +62,9 @@ func _physics_process(delta: float) -> void:
 		_choose_target_if_needed()
 	if carried_ore >= carry_capacity or (_target_vein == null and carried_ore > 0.0):
 		_returning_home = true
+		# Home buildings can be added while this worker is mining. Do not keep
+		# using the previous cached Command Center for the new return trip.
+		_home = null
 		_home_approach_position = null
 		entity.set_action_state(Entity.ActionState.RETURNING_TO_BASE)
 		_go_home()
@@ -75,6 +78,7 @@ func _physics_process(delta: float) -> void:
 		# abandon the mining attempt and return to its Command Center, not stop
 		# indefinitely at the resource while combat units are dispatched.
 		_returning_home = true
+		_home = null
 		_home_approach_position = null
 		entity.set_action_state(Entity.ActionState.RETURNING_TO_BASE)
 		_go_home()
@@ -116,6 +120,7 @@ func _physics_process(delta: float) -> void:
 		_mining_vein = false
 		_release_mining_access()
 		_returning_home = true
+		_home = null
 		_home_approach_position = null
 		entity.set_action_state(Entity.ActionState.RETURNING_TO_BASE)
 		_go_home()
@@ -328,7 +333,9 @@ func _find_home() -> Node2D:
 	var best: Node2D
 	var best_distance := INF
 	for candidate in get_tree().get_nodes_in_group("territory_owners"):
-		if candidate is Node2D and candidate.get("faction_team") == _team() and not bool(candidate.get("under_construction")) and (not candidate.has_method("is_main_building") or bool(candidate.call("is_main_building"))):
+		# Only completed Command Centers are resource return points. Supply
+		# Depots and Barracks may belong to the faction but are not drop-off sites.
+		if candidate is EnemySpawnerBuilding and candidate.faction_team == _team() and not candidate.under_construction and candidate.is_main_building():
 			var distance := entity.global_position.distance_squared_to(candidate.global_position)
 			if distance < best_distance:
 				best_distance = distance
