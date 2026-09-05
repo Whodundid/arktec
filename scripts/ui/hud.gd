@@ -133,6 +133,18 @@ func _draw() -> void:
 	draw_string(small_font, performance_panel.position + Vector2(12, 77), "PHYS:  %5.2f ms" % RuntimeLogger.get_physics_time_ms(), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("9cb5b5"))
 	draw_string(small_font, performance_panel.position + Vector2(108, 22), "ORE: %d" % ResourceLedger.get_ore(TeamComponent.Team.PLAYER), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("f4d58b"))
 
+	var clock_panel := Rect2(size.x - 240.0, 28.0, 212.0, 70.0)
+	draw_style_box(_panel(Color("101b25"), Color("4d6f78")), clock_panel)
+	draw_string(title_font, clock_panel.position + Vector2(12, 22), "TIME OF DAY", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("f4d58b"))
+	var day_night_cycles := get_tree().get_nodes_in_group("day_night_cycles")
+	if not day_night_cycles.is_empty():
+		var day_night: Node = day_night_cycles[0]
+		draw_string(small_font, clock_panel.position + Vector2(12, 43), "%s   %s" % [day_night.call("get_time_of_day_text"), day_night.call("get_phase_text")], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("dce5df"))
+		var progress := clampf(float(day_night.call("get_cycle_progress")), 0.0, 1.0)
+		var progress_rect := Rect2(clock_panel.position + Vector2(12, 53), Vector2(clock_panel.size.x - 24.0, 7.0))
+		draw_rect(progress_rect, Color("243844"), true)
+		draw_rect(Rect2(progress_rect.position, Vector2(progress_rect.size.x * progress, progress_rect.size.y)), Color("d5a15e"), true)
+
 	var buttons := _command_button_rects()
 	var selected_entities := _selected_entities()
 	var right_panel := Rect2(buttons[0].position - Vector2(16, 190), Vector2(332, 232))

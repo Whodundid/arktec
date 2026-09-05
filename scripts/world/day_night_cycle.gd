@@ -9,10 +9,10 @@ signal lighting_changed(daylight: float, sun_direction: Vector2)
 @export_range(60.0, 1800.0, 10.0) var full_day_length_seconds := 600.0
 @export_range(0.1, 0.9, 0.05) var daylight_ratio := 0.6
 @export_range(0.0, 1.0, 0.01) var starting_time := 0.18
+@export var night_color := Color(0.34, 0.40, 0.56, 1.0)
 @export var run_in_pause := false
 
 const DAY_COLOR := Color(1.0, 1.0, 1.0, 1.0)
-const NIGHT_COLOR := Color(0.22, 0.27, 0.40, 1.0)
 const SUNRISE_COLOR := Color(0.98, 0.78, 0.62, 1.0)
 
 var _elapsed_seconds := 0.0
@@ -36,6 +36,14 @@ func _process(delta: float) -> void:
 func get_cycle_progress() -> float:
 	return fposmod(_elapsed_seconds / maxf(full_day_length_seconds, 1.0), 1.0)
 
+func get_time_of_day_text() -> String:
+	var elapsed_seconds := clampi(floori(_elapsed_seconds), 0, maxi(0, roundi(full_day_length_seconds) - 1))
+	var total_seconds := maxi(1, roundi(full_day_length_seconds))
+	return "%02d:%02d / %02d:%02d" % [elapsed_seconds / 60, elapsed_seconds % 60, total_seconds / 60, total_seconds % 60]
+
+func get_phase_text() -> String:
+	return "DAY" if get_cycle_progress() < clampf(daylight_ratio, 0.1, 0.9) else "NIGHT"
+
 func get_daylight_amount() -> float:
 	var progress := get_cycle_progress()
 	var day_length := clampf(daylight_ratio, 0.1, 0.9)
@@ -58,7 +66,7 @@ func _apply_lighting() -> void:
 	var daylight := get_daylight_amount()
 	var sun_direction := get_sun_direction()
 	if _canvas_modulate != null:
-		var color := NIGHT_COLOR.lerp(DAY_COLOR, daylight)
+		var color := night_color.lerp(DAY_COLOR, daylight)
 		# Warm the low sun without making the terrain unreadably orange.
 		var low_sun := 1.0 - absf(daylight * 2.0 - 1.0)
 		_canvas_modulate.color = color.lerp(SUNRISE_COLOR, clampf(low_sun, 0.0, 1.0) * 0.22)
