@@ -18,6 +18,17 @@ func _draw() -> void:
 	var group_controllers := get_tree().get_nodes_in_group("group_movement_controller")
 	if not group_controllers.is_empty():
 		var group_controller := group_controllers[0] as GroupMovementController
+		if group_controller.has_attack_marker():
+			var attack_target := group_controller.get_attack_target()
+			var attack_alpha := group_controller.get_attack_marker_alpha()
+			var attack_color := Color("ef626c")
+			attack_color.a = attack_alpha
+			var attack_position := attack_target.global_position
+			draw_circle(attack_position, 28.0, Color(0.15, 0.02, 0.03, 0.28 * attack_alpha))
+			draw_arc(attack_position, 30.0, 0.0, TAU, 32, attack_color, 3.0)
+			draw_line(attack_position - Vector2(38, 0), attack_position + Vector2(38, 0), attack_color, 2.0)
+			draw_line(attack_position - Vector2(0, 38), attack_position + Vector2(0, 38), attack_color, 2.0)
+			draw_string(ThemeDB.fallback_font, attack_position + Vector2(-32, -42), "ATTACK", HORIZONTAL_ALIGNMENT_CENTER, 64.0, 12, attack_color)
 		if group_controller.has_group_marker():
 			var group_destination: Vector2 = group_controller.get_group_destination()
 			var group_alpha := group_controller.get_group_marker_alpha()

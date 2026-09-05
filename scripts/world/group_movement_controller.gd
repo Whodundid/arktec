@@ -10,6 +10,8 @@ extends Node2D
 
 var _group_destination: Variant = null
 var _group_marker_remaining := 0.0
+var _attack_target: Entity
+var _attack_marker_remaining := 0.0
 var _group_entities: Array[Entity] = []
 var _active_group_entities: Array[Entity] = []
 var _active_group_destination: Variant = null
@@ -40,6 +42,9 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_group_marker_remaining = maxf(_group_marker_remaining - delta, 0.0)
+	_attack_marker_remaining = maxf(_attack_marker_remaining - delta, 0.0)
+	if _attack_marker_remaining <= 0.0:
+		_attack_target = null
 	if _group_marker_remaining <= 0.0:
 		_group_destination = null
 		_group_entities.clear()
@@ -169,6 +174,15 @@ func get_group_marker_alpha() -> float:
 
 func get_group_marker_color() -> Color:
 	return Color("5ee27a")
+
+func has_attack_marker() -> bool:
+	return is_instance_valid(_attack_target) and _attack_marker_remaining > 0.0
+
+func get_attack_target() -> Entity:
+	return _attack_target
+
+func get_attack_marker_alpha() -> float:
+	return clampf(_attack_marker_remaining / 1.5, 0.0, 1.0)
 
 func is_entity_in_group_order(entity: Entity) -> bool:
 	return has_group_marker() and _group_entities.has(entity)
@@ -354,6 +368,8 @@ func _try_issue_attack(selected: Array[Entity], world_position: Vector2) -> bool
 	_clear_formation_motion()
 	_clear_formation_layout()
 	var target := leader_combat.target
+	_attack_target = target
+	_attack_marker_remaining = 1.5
 	for index in range(1, selected.size()):
 		var combat := selected[index].get_component(CombatComponent) as CombatComponent
 		if combat != null:
@@ -373,6 +389,8 @@ func _issue_move(selected: Array[Entity], destination: Vector2) -> void:
 		var combat := entity.get_component(CombatComponent) as CombatComponent
 		if combat != null:
 			combat.begin_manual_move()
+	_attack_target = null
+	_attack_marker_remaining = 0.0
 	if formation_enabled:
 		if not _formation_entities.is_empty():
 			_retarget_active_formation(destination)
