@@ -43,7 +43,8 @@ func _draw() -> void:
 
 func _select_entities_in_box() -> void:
 	var selection_rect := _screen_rect(_drag_start, _drag_current)
-	var selected_any := false
+	var unit_selectables: Array[MouseControlComponent] = []
+	var building_selectables: Array[MouseControlComponent] = []
 
 	for selectable in get_tree().get_nodes_in_group("mouse_controlled_entities"):
 		if not selectable is MouseControlComponent or not selectable.can_be_selected():
@@ -53,10 +54,35 @@ func _select_entities_in_box() -> void:
 			continue
 		var screen_position := get_viewport().get_canvas_transform() * entity.global_position
 		if selection_rect.has_point(screen_position):
-			if not selected_any:
-				_clear_selection()
-				selected_any = true
+			if entity.grounded:
+				building_selectables.append(selectable)
+			else:
+				unit_selectables.append(selectable)
+
+	# Marquee selection is unit-first: buildings inside a mixed drag are not
+	# included, so a formation can be selected without accidentally selecting a
+	# nearby Command Center. If the box contains buildings only, select the one
+	# closest to the box center rather than selecting the whole cluster.
+	if not unit_selectables.is_empty():
+		_clear_selection()
+		for selectable in unit_selectables:
 			selectable.set_selected(true)
+		return
+	if building_selectables.is_empty():
+		return
+
+	var box_center := selection_rect.get_center()
+	var closest_building: MouseControlComponent = building_selectables[0]
+	var closest_distance := INF
+	for selectable in building_selectables:
+		var entity := selectable.entity as Entity
+		var screen_position := get_viewport().get_canvas_transform() * entity.global_position
+		var distance := screen_position.distance_squared_to(box_center)
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_building = selectable
+	_clear_selection()
+	closest_building.set_selected(true)
 
 func _select_entity_at(screen_position: Vector2) -> void:
 	var mouse_world_position := get_viewport().get_canvas_transform().affine_inverse() * screen_position
