@@ -46,7 +46,7 @@ func _process(delta: float) -> void:
 	_update_group_arrival()
 	_update_formation_motion(delta)
 
-func _unhandled_input(event: InputEvent) -> void:
+func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F4:
 		formation_enabled = not formation_enabled
 		if not formation_enabled:
@@ -58,15 +58,102 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	if not event is InputEventMouseButton or not event.pressed or event.button_index != MOUSE_BUTTON_RIGHT:
 		return
+	var selected_building := _selected_player_building()
+	if selected_building != null:
+		var rally_world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * event.position
+		selected_building.set_training_rally_point(_rally_target_position(rally_world_position, selected_building))
+		get_viewport().set_input_as_handled()
+		return
 	var selected := _selected_player_entities()
 	if selected.is_empty():
 		return
 
 	var world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * event.position
+	var target_building := _friendly_building_at(world_position)
+	if target_building != null:
+		NetworkSession.submit_command(COMMAND_CONTEXT_ORDER, _entity_ids(selected), {"destination": target_building.global_position, "building_id": target_building.network_entity_id, "formation": formation_enabled})
+		get_viewport().set_input_as_handled()
+		return
+	var vein := _ore_vein_at(world_position)
+	if vein != null:
+		var harvest_ordered := false
+		for entity in selected:
+			var alert := entity.get_component(AlertComponent) as AlertComponent
+			var harvest := entity.get_component(HarvestComponent) as HarvestComponent
+			if alert != null and alert.role == AlertComponent.Role.BUILDER and harvest != null:
+				harvest_ordered = harvest.request_harvest(vein) or harvest_ordered
+		if harvest_ordered:
+			get_viewport().set_input_as_handled()
+			return
 	# A right-click on an enemy is an explicit attack order. Right-clicking
 	# elsewhere remains a manual move and ignores enemies encountered in range.
 	NetworkSession.submit_command(COMMAND_CONTEXT_ORDER, _entity_ids(selected), {"destination": world_position, "formation": formation_enabled})
 	get_viewport().set_input_as_handled()
+
+func _ore_vein_at(world_position: Vector2) -> OreVein:
+	var closest: OreVein
+	var closest_distance := 56.0
+	for candidate in get_tree().get_nodes_in_group("ore_veins"):
+		if not candidate is OreVein or not is_instance_valid(candidate):
+			continue
+		var vein := candidate as OreVein
+		if vein.ore <= 1.0:
+			continue
+		var distance := vein.global_position.distance_to(world_position)
+		if distance <= closest_distance:
+			closest_distance = distance
+			closest = vein
+	return closest
+
+func _friendly_building_at(world_position: Vector2) -> EnemySpawnerBuilding:
+	var closest: EnemySpawnerBuilding
+	var closest_distance := 48.0
+	for candidate in get_tree().get_nodes_in_group("buildings"):
+		if not candidate is EnemySpawnerBuilding or not is_instance_valid(candidate):
+			continue
+		var building := candidate as EnemySpawnerBuilding
+		var team := building.get_component(TeamComponent) as TeamComponent
+		if team == null or team.team != TeamComponent.Team.PLAYER:
+			continue
+		var distance := building.global_position.distance_to(world_position)
+		if distance <= closest_distance:
+			closest_distance = distance
+			closest = building
+	return closest
+
+func _selected_player_building() -> EnemySpawnerBuilding:
+	for candidate in get_tree().get_nodes_in_group("entities"):
+		if not candidate is EnemySpawnerBuilding or not is_instance_valid(candidate) or not (candidate as Entity).is_selected:
+			continue
+		var building := candidate as EnemySpawnerBuilding
+		var team := building.get_component(TeamComponent) as TeamComponent
+		if team != null and team.team == TeamComponent.Team.PLAYER and building.is_owned_by_peer(NetworkSession.get_local_peer_id()):
+			return building
+	return null
+
+func _rally_target_position(world_position: Vector2, owner: EnemySpawnerBuilding) -> Vector2:
+	var closest_position := world_position
+	var closest_distance := 56.0
+	for candidate in get_tree().get_nodes_in_group("ore_veins"):
+		if not candidate is OreVein or not is_instance_valid(candidate):
+			continue
+		var vein := candidate as OreVein
+		if vein.ore <= 0.0:
+			continue
+		var distance := vein.global_position.distance_to(world_position)
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_position = vein.global_position
+	for candidate in get_tree().get_nodes_in_group("entities"):
+		if candidate == owner or not candidate is Entity or not is_instance_valid(candidate):
+			continue
+		var entity := candidate as Entity
+		var distance := entity.global_position.distance_to(world_position)
+		if distance >= closest_distance:
+			continue
+		closest_distance = distance
+		closest_position = entity.global_position
+	return closest_position
 
 func is_formation_enabled() -> bool:
 	return formation_enabled
@@ -148,6 +235,10 @@ func _on_network_command(sender_peer_id: int, command_type: StringName, entity_i
 	var destination := destination_value as Vector2
 	if not destination.is_finite():
 		return
+	var building_id := int(payload.get("building_id", 0))
+	if building_id > 0 and _issue_building_order(entities, building_id):
+		return
+	_cancel_harvesting_orders(entities)
 	var previous_formation_mode := formation_enabled
 	formation_enabled = bool(payload.get("formation", false))
 	if command_type == COMMAND_CONTEXT_ORDER:
@@ -161,6 +252,35 @@ func _on_network_command(sender_peer_id: int, command_type: StringName, entity_i
 		if not _try_issue_attack(entities, destination):
 			_confirm_attack_move(entities, destination)
 	formation_enabled = previous_formation_mode
+
+func _cancel_harvesting_orders(entities: Array[Entity]) -> void:
+	for entity in entities:
+		var harvest := entity.get_component(HarvestComponent) as HarvestComponent
+		if harvest != null:
+			harvest.cancel_if_mining()
+
+func _issue_building_order(entities: Array[Entity], building_id: int) -> bool:
+	var target_value := NetworkSession.get_entity(building_id)
+	if target_value == null or not target_value is EnemySpawnerBuilding:
+		return false
+	var building := target_value as EnemySpawnerBuilding
+	var building_team := building.get_component(TeamComponent) as TeamComponent
+	if building_team == null or building_team.team != TeamComponent.Team.PLAYER:
+		return false
+	for entity in entities:
+		var combat := entity.get_component(CombatComponent) as CombatComponent
+		if combat != null:
+			combat.begin_manual_move()
+		var harvest := entity.get_component(HarvestComponent) as HarvestComponent
+		if harvest != null and harvest.request_return_to_building(building):
+			continue
+		if harvest != null:
+			harvest.cancel_if_mining()
+		var movement := entity.get_component(MovementComponent) as MovementComponent
+		if movement != null:
+			var approach := building.get_building_approach_position(entity.global_position)
+			movement.move_to(approach)
+	return true
 
 func _entity_ids(entities: Array[Entity]) -> Array:
 	var ids: Array = []

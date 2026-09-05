@@ -22,6 +22,11 @@ config/features=PackedStringArray("4.7", "GL Compatibility")
 
 NetworkSession="*res://scripts/network/network_session.gd"
 ResourceLedger="*res://scripts/economy/resource_ledger.gd"
+WorldSeed="*res://scripts/world/world_seed.gd"
+RuntimeLogger="*res://scripts/diagnostics/runtime_logger.gd"
+UserSettings="*res://scripts/settings/user_settings.gd"
+DeepProfiler="*res://scripts/diagnostics/deep_profiler.gd"
+InputRecorder="*res://scripts/diagnostics/input_recorder.gd"
 
 [display]
 

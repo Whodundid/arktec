@@ -1,6 +1,9 @@
 class_name Entity
 extends CharacterBody2D
 
+const WORLD_DEPTH_BASE := 1000
+const WORLD_DEPTH_STEP := 16.0
+
 ## Base for world entities. Behavior is composed from child EntityComponent nodes.
 
 var _components: Array[EntityComponent] = []
@@ -38,7 +41,7 @@ func _ready() -> void:
 		collision_layer |= 1 << 5 # Projectile blockers (layer 6)
 		add_to_group("buildings")
 	# Keep world-order indicators and other ground effects beneath entities.
-	z_index = 1
+	z_index = WORLD_DEPTH_BASE + floori(global_position.y / WORLD_DEPTH_STEP)
 	for child in get_children():
 		if child is EntityComponent:
 			_components.append(child)
@@ -52,7 +55,20 @@ func is_simulation_authority() -> bool:
 	return NetworkSession.is_simulation_authority()
 
 func set_action_state(next_state: int) -> void:
+	if action_state == next_state:
+		return
 	action_state = next_state
+	RuntimeLogger.debug("%s - action state: %s" % [get_diagnostics_identity(), ActionState.keys()[next_state]])
+
+func get_diagnostics_identity() -> String:
+	var faction: String = "UNKNOWN"
+	var team := get_component(TeamComponent) as TeamComponent
+	if team != null:
+		faction = TeamComponent.Team.keys()[team.team]
+	var unit_type: Variant = get("display_name")
+	if unit_type == null or str(unit_type).is_empty():
+		unit_type = get_class()
+	return "[%s, %s, ID=%d]" % [faction, str(unit_type).to_upper(), network_entity_id]
 
 func is_owned_by_peer(peer_id: int) -> bool:
 	return owning_peer_id == peer_id
@@ -61,6 +77,9 @@ func _on_session_mode_changed(_mode: int) -> void:
 	_update_component_authority()
 
 func _physics_process(_delta: float) -> void:
+	# Match decorative world objects: lower entities are drawn in front of
+	# objects whose trunks are farther north, creating simple RTS depth.
+	z_index = WORLD_DEPTH_BASE + floori(global_position.y / WORLD_DEPTH_STEP)
 	if _spatial_index != null:
 		_spatial_index.update_entity(self)
 
@@ -146,8 +165,15 @@ func push_teammates(direction: Vector2, distance: float) -> void:
 	var own_team := get_component(TeamComponent) as TeamComponent
 	if own_team == null:
 		return
+	var profiling := DeepProfiler.is_enabled()
+	var profiling_started_usec := Time.get_ticks_usec() if profiling else 0
 	var desired_direction := direction.normalized()
-	for candidate in get_nearby_entities(collision_radius * 4.0 + 64.0):
+	var nearby_query_started_usec := Time.get_ticks_usec() if profiling else 0
+	var nearby_entities := get_nearby_entities(collision_radius * 4.0 + 64.0)
+	if profiling:
+		DeepProfiler.record_timing("movement.push_teammates_query", Time.get_ticks_usec() - nearby_query_started_usec, self)
+		DeepProfiler.increment("movement.push_teammates_candidates", nearby_entities.size())
+	for candidate in nearby_entities:
 		if candidate == self or not candidate is Entity:
 			continue
 		var other := candidate as Entity
@@ -187,6 +213,8 @@ func push_teammates(direction: Vector2, distance: float) -> void:
 		# Test both sides of the mover's travel axis and choose the one with
 		# fewer blockers. The instance-id tie-break is only a final fallback,
 		# preventing a left/right bias when both sides are genuinely equal.
+		if profiling:
+			DeepProfiler.increment("movement.push_teammates_slide_choices")
 		var slide_direction := _choose_slide_direction(other, desired_direction, to_other_direction, distance * teammate_slide_strength)
 
 		# Moving teammates get only a tiny separation nudge, while stationary
@@ -201,6 +229,10 @@ func push_teammates(direction: Vector2, distance: float) -> void:
 		var maps := get_tree().get_nodes_in_group("terrain_maps")
 		if not maps.is_empty():
 			other.global_position = (maps[0] as TerrainMap).clamp_entity_position(other.global_position, other.collision_radius)
+		if profiling:
+			DeepProfiler.increment("movement.push_teammates_actual_pushes")
+	if profiling:
+		DeepProfiler.record_timing("movement.push_teammates", Time.get_ticks_usec() - profiling_started_usec, self)
 
 func _choose_slide_direction(other: Entity, desired_direction: Vector2, to_other_direction: Vector2, test_distance: float) -> Vector2:
 	var side := desired_direction.orthogonal().normalized()
@@ -228,6 +260,8 @@ func _choose_slide_direction(other: Entity, desired_direction: Vector2, to_other
 	return side if get_instance_id() < other.get_instance_id() else -side
 
 func _count_slide_blockers(other: Entity, offset: Vector2) -> int:
+	var profiling := DeepProfiler.is_enabled()
+	var profiling_started_usec := Time.get_ticks_usec() if profiling else 0
 	var shape := CircleShape2D.new()
 	shape.radius = other.collision_radius
 	var query := PhysicsShapeQueryParameters2D.new()
@@ -236,7 +270,11 @@ func _count_slide_blockers(other: Entity, offset: Vector2) -> int:
 	query.collision_mask = other.collision_mask
 	query.collide_with_bodies = true
 	query.exclude = [other.get_rid(), get_rid()]
-	return get_world_2d().direct_space_state.intersect_shape(query, 8).size()
+	var blocker_count := get_world_2d().direct_space_state.intersect_shape(query, 8).size()
+	if profiling:
+		DeepProfiler.record_timing("movement.slide_blocker_query", Time.get_ticks_usec() - profiling_started_usec, self)
+		DeepProfiler.increment("movement.slide_blockers_found", blocker_count)
+	return blocker_count
 
 func is_teammate(other: Entity) -> bool:
 	if other == null:

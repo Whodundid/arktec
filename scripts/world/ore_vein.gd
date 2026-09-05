@@ -10,6 +10,7 @@ var ore := 0.0
 var _depleted := false
 var _active_miner: Node
 var _mining_queue: Array[Node] = []
+var _harvest_target_flash_remaining := 0.0
 
 func _ready() -> void:
 	ore = maximum_ore
@@ -18,6 +19,11 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	ore = minf(maximum_ore, ore + growth_per_second * delta)
+	_harvest_target_flash_remaining = maxf(_harvest_target_flash_remaining - delta, 0.0)
+	queue_redraw()
+
+func flash_harvest_target() -> void:
+	_harvest_target_flash_remaining = 1.1
 	queue_redraw()
 
 func harvest(amount: float) -> float:
@@ -53,6 +59,12 @@ func request_mining_access(worker: Node) -> bool:
 	_active_miner = worker
 	return true
 
+func is_available_for_mining(worker: Node = null) -> bool:
+	_prune_mining_queue()
+	if _active_miner != null and _active_miner != worker:
+		return false
+	return _mining_queue.is_empty() or (_mining_queue.size() == 1 and _mining_queue[0] == worker)
+
 func release_mining_access(worker: Node) -> void:
 	_mining_queue.erase(worker)
 	if _active_miner == worker:
@@ -69,6 +81,13 @@ func _prune_mining_queue() -> void:
 
 func _draw() -> void:
 	var ratio := clampf(ore / maxf(maximum_ore, 1.0), 0.0, 1.0)
+	if _harvest_target_flash_remaining > 0.0:
+		var pulse := 1.0 - _harvest_target_flash_remaining / 1.1
+		var pulse_radius := lerpf(52.0, 70.0, pulse)
+		var pulse_alpha := 0.95 * (1.0 - pulse * 0.55)
+		draw_arc(Vector2.ZERO, pulse_radius, 0.0, TAU, 40, Color(1.0, 0.82, 0.25, pulse_alpha), 4.0)
+		draw_arc(Vector2.ZERO, pulse_radius - 7.0, -PI * 0.5, -PI * 0.5 + TAU * (1.0 - pulse), 32, Color("fff0a3"), 3.0)
+		draw_string(ThemeDB.fallback_font, Vector2(-42, -56), "HARVEST", HORIZONTAL_ALIGNMENT_CENTER, 84, 12, Color(1.0, 0.9, 0.45, pulse_alpha))
 	draw_circle(Vector2.ZERO, 42.0, Color("293b46"))
 	draw_circle(Vector2.ZERO, 32.0, Color("526f72"))
 	draw_circle(Vector2.ZERO, 22.0, Color("d0a451").lerp(Color("42505a"), 1.0 - ratio))

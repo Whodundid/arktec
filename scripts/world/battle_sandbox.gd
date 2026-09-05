@@ -3,17 +3,18 @@ extends Node2D
 
 const FACTION_TERRITORY_SCRIPT = preload("res://scripts/world/faction_territory.gd")
 
-## Autonomous two-faction combat harness. This is intentionally a sandbox
+## Autonomous two-faction combat harness with a third player faction. This is intentionally a sandbox
 ## coordinator, not a replacement for mission logic: it periodically issues
 ## attack-move orders while each building's AlertComponent remains responsible
 ## for local defense and returning units home.
 
 @export var building_scene: PackedScene
 @export var units_per_building := [3, 4, 5]
+@export_range(1, 20, 1) var starting_units_per_faction := 2
 @export_range(2.0, 30.0, 0.5) var wave_interval := 8.0
+@export_range(0.1, 1.0, 0.05) var strategic_tick_interval := 0.25
 @export_range(32.0, 300.0, 1.0) var attack_standoff := 160.0
 @export_range(100.0, 10000.0, 25.0) var building_health := 250.0
-@export_range(0.0, 300.0, 5.0) var building_repair_per_second := 10.0
 @export_range(8.0, 120.0, 1.0) var expansion_check_interval := 18.0
 @export_range(0.0, 1.0, 0.05) var expansion_chance := 0.8
 @export_range(0.1, 1.0, 0.05) var expansion_min_delay_factor := 0.35
@@ -23,7 +24,23 @@ const FACTION_TERRITORY_SCRIPT = preload("res://scripts/world/faction_territory.
 @export_range(7.0, 16.0, 1.0) var expansion_min_distance_tiles := 8.0
 @export_range(2.0, 10.0, 1.0) var expansion_spacing_tiles := 4.0
 @export_range(5.0, 120.0, 5.0) var builder_expansion_cooldown := 45.0
-@export_range(0, 8, 1) var max_builders_per_faction := 2
+@export_range(0, 8, 1) var max_builders_per_faction := 4
+@export_range(50, 150, 5) var supply_building_cost := 90
+@export_range(1, 10, 1) var supply_building_bonus := 3
+@export_range(40.0, 160.0, 8.0) var supply_building_health := 90.0
+@export_range(0.4, 1.0, 0.05) var supply_building_footprint_scale := 0.7
+@export_range(100, 300, 10) var barracks_building_cost := 180
+@export_range(0, 300, 10) var player_starting_ore_bonus := 90
+@export_range(100.0, 300.0, 10.0) var barracks_building_health := 180.0
+@export_range(0.7, 1.1, 0.05) var barracks_building_footprint_scale := 0.9
+@export_range(0.0, 1.0, 0.05) var barracks_building_chance := 0.35
+@export_range(1.0, 1.5, 0.05) var main_building_footprint_scale := 1.15
+@export_range(0.0, 1.0, 0.05) var supply_building_chance := 0.45
+@export_range(4.0, 12.0, 1.0) var expansion_min_supply_distance_tiles := 5.0
+@export_range(64.0, 800.0, 16.0) var expansion_resource_attraction_radius := 480.0
+@export_range(64.0, 640.0, 8.0) var expansion_min_resource_distance := 256.0
+@export_range(0.0, 10000.0, 100.0) var expansion_resource_attraction_weight := 2600.0
+@export_range(0.0, 10000.0, 100.0) var expansion_enemy_risk_weight := 1.0
 @export var expansion_cost := 300
 
 var _factions: Array[Dictionary] = []
@@ -34,67 +51,167 @@ var _builder_cooldowns: Dictionary = {}
 var _attack_targets: Dictionary = {}
 var _ore_security_requests: Dictionary = {}
 var _expansion_spacing_remaining := 0.0
+var _strategic_tick_remaining := 0.0
 
 func _ready() -> void:
 	if not NetworkSession.is_simulation_authority():
+		RuntimeLogger.debug("Battle sandbox skipped: this peer is not simulation authority")
 		return
+	RuntimeLogger.info("Battle sandbox initializing")
 	add_to_group("battle_sandboxes")
-	_random.randomize()
+	_random.seed = _get_active_world_seed() ^ 0x464143
+	var starting_positions := _randomize_starting_positions()
 	_create_faction(
 		"Red Faction",
 		TeamComponent.Team.ENEMY,
-		[Vector2(-650.0, -220.0), Vector2(-750.0, 0.0), Vector2(-650.0, 220.0)]
+		[starting_positions[0]]
 	)
 	_create_faction(
 		"Blue Faction",
 		TeamComponent.Team.ALLY,
-		[Vector2(650.0, -220.0), Vector2(750.0, 0.0), Vector2(650.0, 220.0)]
+		[starting_positions[1]]
 	)
+	_create_faction(
+		"Player Faction",
+		TeamComponent.Team.PLAYER,
+		[starting_positions[2]],
+		false
+	)
+	# Player units do not auto-harvest: reserve enough opening ore for the build
+	# menu to be useful while leaving the economy under explicit player control.
+	ResourceLedger.add_ore(TeamComponent.Team.PLAYER, player_starting_ore_bonus)
+	RuntimeLogger.info("Battle sandbox ready: factions=%d" % _factions.size())
+
+func _randomize_starting_positions() -> Array[Vector2]:
+	var terrain_map := _find_terrain_map()
+	if terrain_map != null and terrain_map.has_method("get_faction_spawn_positions"):
+		var generated_positions: Array[Vector2] = terrain_map.call("get_faction_spawn_positions", 2)
+		if generated_positions.size() >= 2:
+			var generated_sites_are_clear := true
+			for position in generated_positions:
+				if not _is_clear_spawner_site(terrain_map, position):
+					generated_sites_are_clear = false
+					break
+			if generated_sites_are_clear:
+				var third_position: Variant = _find_third_starting_position(terrain_map, generated_positions)
+				if third_position != null:
+					generated_positions.append(third_position as Vector2)
+					return generated_positions
+	var positions: Array[Vector2] = []
+	for side in [-1, 1]:
+		var chosen := Vector2(650.0 * float(side), -220.0)
+		for attempt in range(20):
+			var candidate := Vector2(
+				_random.randf_range(560.0, 760.0) * float(side),
+				_random.randf_range(-420.0, 180.0)
+			)
+			if terrain_map == null or _is_clear_spawner_site(terrain_map, candidate):
+				chosen = candidate
+				break
+		positions.append(chosen)
+	var third_position: Variant = _find_third_starting_position(terrain_map, positions) if terrain_map != null else null
+	positions.append(third_position as Vector2 if third_position is Vector2 else Vector2(0.0, 620.0))
+	return positions
+
+func _find_third_starting_position(terrain_map: TerrainMap, occupied: Array[Vector2]) -> Variant:
+	if terrain_map == null:
+		return null
+	var map_bounds := Rect2(terrain_map.map_origin, Vector2(terrain_map.columns, terrain_map.rows) * terrain_map.tile_size)
+	var inset := terrain_map.tile_size * 4.0
+	var preferred_positions: Array[Vector2] = [
+		Vector2.ZERO,
+		Vector2(0.0, 640.0),
+		Vector2(0.0, -640.0),
+		Vector2(640.0, 0.0),
+		Vector2(-640.0, 0.0),
+	]
+	for preferred in preferred_positions:
+		if _is_valid_third_start(preferred, terrain_map, occupied, map_bounds, inset):
+			return preferred
+	for attempt in range(80):
+		var candidate := Vector2(
+			_random.randf_range(map_bounds.position.x + inset, map_bounds.end.x - inset),
+			_random.randf_range(map_bounds.position.y + inset, map_bounds.end.y - inset)
+		)
+		if _is_valid_third_start(candidate, terrain_map, occupied, map_bounds, inset):
+			return candidate
+	return null
+
+func _is_valid_third_start(candidate: Vector2, terrain_map: TerrainMap, occupied: Array[Vector2], map_bounds: Rect2, inset: float) -> bool:
+	if not map_bounds.grow(-inset).has_point(candidate):
+		return false
+	for other in occupied:
+		if candidate.distance_to(other) < terrain_map.tile_size * 8.0:
+			return false
+	return _is_clear_spawner_site(terrain_map, candidate)
 
 func _physics_process(delta: float) -> void:
 	if not NetworkSession.is_simulation_authority() or _factions.size() < 2:
 		return
-	_prune_faction_buildings()
-	_enforce_all_builder_caps()
+
+	_strategic_tick_remaining = maxf(_strategic_tick_remaining - delta, 0.0)
 	for builder_id in _builder_cooldowns.keys():
 		_builder_cooldowns[builder_id] = maxf(float(_builder_cooldowns[builder_id]) - delta, 0.0)
 	_expansion_spacing_remaining = maxf(_expansion_spacing_remaining - delta, 0.0)
-	for faction in _factions:
-		for building_value in faction["buildings"]:
-			if building_value == null or not is_instance_valid(building_value) or not building_value is EnemySpawnerBuilding:
-				continue
-			var building := building_value as EnemySpawnerBuilding
-			var health := building.get_component(HealthComponent) as HealthComponent
-			if health != null:
-				health.heal(building_repair_per_second * delta)
+
 	for faction_index in range(_factions.size()):
+		var faction: Dictionary = _factions[faction_index]
+		if not bool(faction.get("autonomous", true)):
+			continue
 		_wave_remaining[faction_index] -= delta
 		if _wave_remaining[faction_index] <= 0.0:
 			_launch_wave(faction_index)
 			_wave_remaining[faction_index] = _random_wave_delay()
-		var faction: Dictionary = _factions[faction_index]
-		faction["expansion_remaining"] -= delta
+
+		# 1. Access the dictionary directly inside the array loop
+		# 2. Safety check: Ensure key exists and force float type conversion
+		if not faction.has("expansion_remaining"):
+			faction["expansion_remaining"] = _random_expansion_delay()
+
+		# 3. Explicitly cast to float before subtracting to prevent truncation issues
+		faction["expansion_remaining"] = float(faction["expansion_remaining"]) - delta
+
 		if faction["expansion_remaining"] <= 0.0:
 			faction["expansion_remaining"] = _random_expansion_delay()
 			if _random.randf() <= expansion_chance:
 				_try_start_expansion(faction_index)
-	_update_war_states()
-	_prune_ore_security_requests()
-	_update_expansions(delta)
-	_maintain_attack_parties()
 
-func _create_faction(label: String, team: TeamComponent.Team, positions: Array[Vector2]) -> void:
+		# 4. Explicitly re-assign back to the array to guarantee the state changes persist
+		_factions[faction_index] = faction
+
+	_update_expansions(delta)
+
+	if _strategic_tick_remaining <= 0.0:
+		_strategic_tick_remaining = strategic_tick_interval
+		_prune_faction_buildings()
+		_enforce_all_builder_caps()
+		_update_war_states()
+		_prune_ore_security_requests()
+		_maintain_attack_parties()
+
+
+func _create_faction(label: String, team: TeamComponent.Team, positions: Array[Vector2], autonomous: bool = true) -> void:
 	var faction_buildings: Array = []
 	var territory: Node2D = FACTION_TERRITORY_SCRIPT.new()
 	territory.set("faction_team", team)
 	add_child(territory)
-	for index in range(positions.size()):
+	# A faction begins with one headquarters. Its capacity preserves the old
+	# sandbox's approximate starting force, but only a small garrison is present
+	# immediately; the rest must be trained over time. The opening garrison is
+	# deliberately one builder and one combat unit so expansion is possible
+	# without giving either faction a full army for free.
+	for index in range(1):
 		var building := building_scene.instantiate() as EnemySpawnerBuilding
 		if building == null:
 			continue
 		building.faction_name = label
 		building.faction_team = team
-		building.max_active_enemies = units_per_building[index % units_per_building.size()]
+		building.max_active_enemies = maxi(starting_units_per_faction, _starting_force_capacity())
+		building.initial_spawn_count = starting_units_per_faction
+		building.initial_spawn_role = AlertComponent.Role.GUARD
+		building.initial_spawn_roles = [AlertComponent.Role.BUILDER, AlertComponent.Role.GUARD]
+		building.counts_as_starting_building = true
+		building.footprint_scale = main_building_footprint_scale
 		building.territory_radius = 180.0
 		building.defense_alert_radius = 300.0
 		building.respawn_delay = 5.0
@@ -102,6 +219,8 @@ func _create_faction(label: String, team: TeamComponent.Team, positions: Array[V
 		building.initial_spawn_jitter = 2.5
 		building.builder_chance = 0.08
 		building.guarantee_builder = index == 0
+		building.autonomous = autonomous
+		building.auto_train = autonomous
 		add_child(building)
 		building.global_position = positions[index]
 		building.set_shared_territory_owner(territory)
@@ -118,10 +237,73 @@ func _create_faction(label: String, team: TeamComponent.Team, positions: Array[V
 		"buildings": faction_buildings,
 		"territory": territory,
 		"origin": positions[0],
+		"autonomous": autonomous,
 		"at_war": false,
 		"expansion_remaining": _random_expansion_delay(),
 	})
 	_wave_remaining.append(_random_wave_delay())
+
+func can_start_unit_training(building: EnemySpawnerBuilding) -> bool:
+	if not is_instance_valid(building):
+		return false
+	var faction := _find_faction_for_team(building.faction_team)
+	if faction.is_empty():
+		return true
+	return _get_faction_supply_used(faction) < _get_faction_supply_limit(faction)
+
+func can_advance_unit_training(building: EnemySpawnerBuilding) -> bool:
+	if not is_instance_valid(building):
+		return false
+	var faction := _find_faction_for_team(building.faction_team)
+	if faction.is_empty():
+		return true
+	# The unit currently being trained is already included in supply usage. It
+	# must be excluded for its own progress check, otherwise reaching the cap
+	# would freeze that unit permanently.
+	var used := _get_faction_supply_used(faction)
+	if building.is_training():
+		used -= 1
+	return used < _get_faction_supply_limit(faction)
+
+func get_faction_supply(team: TeamComponent.Team) -> Dictionary:
+	var faction := _find_faction_for_team(team)
+	if faction.is_empty():
+		return {}
+	return {
+		"current": _get_faction_supply_used(faction),
+		"maximum": _get_faction_supply_limit(faction),
+	}
+
+func _get_faction_supply_used(faction: Dictionary) -> int:
+	var used := 0
+	for building_value in faction["buildings"]:
+		if not is_instance_valid(building_value) or not building_value is EnemySpawnerBuilding:
+			continue
+		var building := building_value as EnemySpawnerBuilding
+		used += building.get_active_enemies().size()
+		if building.is_training():
+			used += 1
+	return used
+
+func _get_faction_supply_limit(faction: Dictionary) -> int:
+	var limit := starting_units_per_faction
+	for building_value in faction["buildings"]:
+		if not is_instance_valid(building_value) or not building_value is EnemySpawnerBuilding:
+			continue
+		var building := building_value as EnemySpawnerBuilding
+		if building.under_construction:
+			continue
+		if building.is_supply_building():
+			limit += supply_building_bonus
+		elif not building.counts_as_starting_building:
+			limit += building.max_active_enemies
+	return limit
+
+func _starting_force_capacity() -> int:
+	var capacity := 0
+	for value in units_per_building:
+		capacity += maxi(int(value), 0)
+	return maxi(capacity, starting_units_per_faction)
 
 func _prune_faction_buildings() -> void:
 	for faction in _factions:
@@ -270,6 +452,23 @@ func request_worker_defense(worker: Entity, attacker: Entity) -> void:
 	for index in range(mini(3, candidates.size())):
 		_issue_defense_order(candidates[index], attacker)
 
+func has_available_combat_defender(team: TeamComponent.Team) -> bool:
+	var faction := _find_faction_for_team(team)
+	if faction.is_empty():
+		return false
+	for building_value in faction["buildings"]:
+		var building := building_value as EnemySpawnerBuilding
+		if not is_instance_valid(building):
+			continue
+		for unit in building.get_active_enemies():
+			var alert := unit.get_component(AlertComponent) as AlertComponent
+			var combat := unit.get_component(CombatComponent) as CombatComponent
+			if alert == null or combat == null or alert.role == AlertComponent.Role.BUILDER:
+				continue
+			if alert.state == AlertComponent.State.IDLE and combat.target == null and not _is_reserved_for_expansion(unit):
+				return true
+	return false
+
 func _issue_defense_order(unit: Entity, attacker: Entity) -> void:
 	if not is_instance_valid(unit) or not is_instance_valid(attacker):
 		return
@@ -334,29 +533,40 @@ func _try_start_expansion(faction_index: int) -> void:
 		if expansion["faction_index"] == faction_index:
 			return
 	var faction: Dictionary = _factions[faction_index]
-	if not ResourceLedger.can_afford(faction["team"], expansion_cost):
-		return
 	var builders := _find_available_builders(faction)
 	if builders.is_empty():
 		return
 	var builder := builders[_random.randi_range(0, builders.size() - 1)] as Entity
-	var position: Variant = _find_expansion_position(faction, builder)
+	var building_type := _choose_expansion_building_type(faction)
+	var is_supply := building_type == EnemySpawnerBuilding.BuildingType.SUPPLY
+	var build_cost := supply_building_cost if is_supply else (barracks_building_cost if building_type == EnemySpawnerBuilding.BuildingType.BARRACKS else expansion_cost)
+	# Check the selected building's actual cost. Supply depots are intentionally
+	# allowed to pass through this decision before the expensive main-expansion
+	# budget gate, so they can support the early economy at the first supply cap.
+	if not ResourceLedger.can_afford(faction["team"], build_cost):
+		return
+	var position: Variant = _find_expansion_position(faction, builder, is_supply)
 	if position == null:
 		return
-	if not ResourceLedger.spend_ore(faction["team"], expansion_cost):
+	if not ResourceLedger.spend_ore(faction["team"], build_cost):
 		return
 	var builder_harvest := builder.get_component(HarvestComponent) as HarvestComponent
 	if builder_harvest != null and not builder_harvest.can_start_construction():
-		ResourceLedger.add_ore(faction["team"], expansion_cost)
+		ResourceLedger.add_ore(faction["team"], build_cost)
 		return
 	if builder_harvest != null:
 		builder_harvest.cancel_harvest_action()
 	var builder_alert := builder.get_component(AlertComponent) as AlertComponent
 	if builder_alert != null:
 		builder_alert.set_construction_active(true)
-	var escorts := _find_expansion_escorts(faction, builder)
+	var is_main_expansion := building_type == EnemySpawnerBuilding.BuildingType.MAIN
+	var escorts = []
+	if is_main_expansion:
+		escorts = _find_expansion_escorts(faction, builder)
 	var expansion := {
 		"faction_index": faction_index,
+		"building_type": building_type,
+		"cost": build_cost,
 		"builder": builder,
 		"escorts": escorts,
 		"position": position,
@@ -366,10 +576,73 @@ func _try_start_expansion(faction_index: int) -> void:
 	_expansions.append(expansion)
 	_expansion_spacing_remaining = _random.randf_range(expansion_min_faction_spacing, expansion_min_faction_spacing * 2.0)
 	_issue_move_to_position(builder, position as Vector2)
-	for escort in escorts:
-		_issue_move_to_position(escort, position as Vector2)
+	if is_main_expansion:
+		for escort in escorts:
+			_issue_move_to_position(escort, position as Vector2)
 
-func _find_available_builders(faction: Dictionary) -> Array[Entity]:
+func request_player_construction(builder: Entity, position: Vector2, building_type: int) -> bool:
+	if not NetworkSession.is_simulation_authority() or not is_instance_valid(builder):
+		return false
+	var team := builder.get_component(TeamComponent) as TeamComponent
+	var alert := builder.get_component(AlertComponent) as AlertComponent
+	if team == null or team.team != TeamComponent.Team.PLAYER or alert == null or alert.role != AlertComponent.Role.BUILDER or alert.state != AlertComponent.State.IDLE:
+		return false
+	var faction := _find_faction_for_team(TeamComponent.Team.PLAYER)
+	if faction.is_empty() or not _find_available_builders(faction, false).has(builder):
+		return false
+	if building_type < EnemySpawnerBuilding.BuildingType.MAIN or building_type > EnemySpawnerBuilding.BuildingType.SUPPLY:
+		return false
+	var is_supply := building_type == EnemySpawnerBuilding.BuildingType.SUPPLY
+	var build_cost := supply_building_cost if is_supply else (barracks_building_cost if building_type == EnemySpawnerBuilding.BuildingType.BARRACKS else expansion_cost)
+	if not ResourceLedger.can_afford(TeamComponent.Team.PLAYER, build_cost):
+		return false
+	if not can_place_player_construction(position, building_type):
+		return false
+	if not ResourceLedger.spend_ore(TeamComponent.Team.PLAYER, build_cost):
+		return false
+	var builder_harvest := builder.get_component(HarvestComponent) as HarvestComponent
+	if builder_harvest != null:
+		builder_harvest.cancel_harvest_action()
+	alert.set_construction_active(true)
+	_expansions.append({
+		"faction_index": _factions.find(faction),
+		"building_type": building_type,
+		"cost": build_cost,
+		"builder": builder,
+		"escorts": [],
+		"position": position,
+		"site": null,
+		"remaining": -1.0,
+	})
+	_issue_move_to_position(builder, position)
+	return true
+
+func has_player_construction_started(builder: Entity) -> bool:
+	# The HUD uses this to keep the placement ghost visible while the builder is
+	# still walking to the confirmed location. A missing expansion means the
+	# order was canceled or has already completed, so the ghost can be cleared.
+	for expansion in _expansions:
+		if expansion.get("builder") == builder:
+			return expansion.get("site") != null
+	return true
+
+func can_place_player_construction(position: Vector2, building_type: int) -> bool:
+	if building_type < EnemySpawnerBuilding.BuildingType.MAIN or building_type > EnemySpawnerBuilding.BuildingType.SUPPLY:
+		return false
+	var footprint_scale := supply_building_footprint_scale if building_type == EnemySpawnerBuilding.BuildingType.SUPPLY else (barracks_building_footprint_scale if building_type == EnemySpawnerBuilding.BuildingType.BARRACKS else main_building_footprint_scale)
+	var terrain_map := _find_terrain_map()
+	if terrain_map == null or not _is_clear_spawner_site(terrain_map, position, footprint_scale):
+		return false
+	for other_faction in _factions:
+		for building_value in other_faction["buildings"]:
+			if is_instance_valid(building_value) and position.distance_to((building_value as EnemySpawnerBuilding).global_position) < 96.0:
+				return false
+	for expansion in _expansions:
+		if position.distance_to(expansion["position"]) < 96.0:
+			return false
+	return true
+
+func _find_available_builders(faction: Dictionary, apply_ai_restrictions: bool = true) -> Array[Entity]:
 	var builders: Array[Entity] = []
 	for building_value in faction["buildings"]:
 		var building := building_value as EnemySpawnerBuilding
@@ -377,7 +650,7 @@ func _find_available_builders(faction: Dictionary) -> Array[Entity]:
 			continue
 		for unit in building.get_active_enemies():
 			var alert := unit.get_component(AlertComponent) as AlertComponent
-			var cooldown := float(_builder_cooldowns.get(unit.get_instance_id(), 0.0))
+			var cooldown := float(_builder_cooldowns.get(unit.get_instance_id(), 0.0)) if apply_ai_restrictions else 0.0
 			var harvest := unit.get_component(HarvestComponent) as HarvestComponent
 			if alert != null and alert.role == AlertComponent.Role.BUILDER and alert.state == AlertComponent.State.IDLE and cooldown <= 0.0 and not _is_reserved_for_expansion(unit) and (harvest == null or harvest.can_start_construction()):
 				builders.append(unit)
@@ -401,34 +674,93 @@ func _find_expansion_escorts(faction: Dictionary, builder: Entity) -> Array[Enti
 		escorts.append(candidates[index])
 	return escorts
 
-func _find_expansion_position(faction: Dictionary, builder: Entity) -> Variant:
+func _should_build_supply(faction: Dictionary) -> bool:
+	var supply_count := 0
+	var used := 0
+	for building_value in faction["buildings"]:
+		if not is_instance_valid(building_value) or not building_value is EnemySpawnerBuilding:
+			continue
+		var building := building_value as EnemySpawnerBuilding
+		if building.is_supply_building() and not building.under_construction:
+			supply_count += 1
+		used += building.get_active_enemies().size()
+		if building.is_training():
+			used += 1
+	var at_supply_limit := used >= _get_faction_supply_limit(faction)
+	return at_supply_limit and (supply_count == 0 or _random.randf() < supply_building_chance)
+
+func _choose_expansion_building_type(faction: Dictionary) -> int:
+	if _should_build_supply(faction):
+		return EnemySpawnerBuilding.BuildingType.SUPPLY
+	var has_barracks := false
+	for building_value in faction["buildings"]:
+		if is_instance_valid(building_value) and building_value is EnemySpawnerBuilding and (building_value as EnemySpawnerBuilding).building_type == EnemySpawnerBuilding.BuildingType.BARRACKS:
+			has_barracks = true
+			break
+	# Once the first supply support exists, establish a combat production site
+	# before spending the faction's next expansion on another main outpost.
+	if not has_barracks:
+		return EnemySpawnerBuilding.BuildingType.BARRACKS
+	return EnemySpawnerBuilding.BuildingType.BARRACKS if _random.randf() < barracks_building_chance else EnemySpawnerBuilding.BuildingType.MAIN
+
+func _find_expansion_position(faction: Dictionary, builder: Entity, for_supply: bool = false) -> Variant:
 	var team: TeamComponent.Team = faction["team"]
-	var outward_direction := Vector2.LEFT if team == TeamComponent.Team.ENEMY else Vector2.RIGHT
 	var terrain_map := _find_terrain_map()
-	var tile_size := terrain_map.tile_size if terrain_map != null else 64.0
-	var minimum_distance := expansion_min_distance_tiles * tile_size
-	var spacing_distance := expansion_spacing_tiles * tile_size
 	var origin: Vector2 = faction["origin"]
+
+	var outward_direction := Vector2.RIGHT # Safe fallback
+
+	for other_faction in _factions:
+		if other_faction["team"] != team:
+			var opponent_origin: Vector2 = other_faction["origin"]
+			outward_direction = origin.direction_to(opponent_origin)
+			break
+
+	if outward_direction.length_squared() <= 0.001:
+		outward_direction = Vector2.RIGHT
+
+	var tile_size := terrain_map.tile_size if terrain_map != null else 64.0
+	var minimum_distance := (expansion_min_supply_distance_tiles if for_supply else expansion_min_distance_tiles) * tile_size
+	var spacing_distance := expansion_spacing_tiles * tile_size
+	var footprint_scale := supply_building_footprint_scale if for_supply else main_building_footprint_scale
+
 	var best_candidate: Variant = null
 	var best_score := INF
+	var resource_veins := _get_live_resource_veins()
+
 	for attempt in range(48):
 		var distance := _random.randf_range(minimum_distance + 24.0, minimum_distance + 220.0)
-		# Prefer expanding away from the opposing faction, while allowing a
-		# broad lateral spread so every expansion does not form one straight line.
-		var direction := outward_direction.rotated(_random.randf_range(-0.75, 0.75))
-		var candidate := origin + direction * distance
+		var candidate: Vector2
+
+		if not for_supply and not resource_veins.is_empty() and _random.randf() < 0.65:
+			var vein := resource_veins[_random.randi_range(0, resource_veins.size() - 1)] as Node2D
+			var from_origin := origin.direction_to(vein.global_position)
+			if from_origin.length_squared() <= 0.001:
+				from_origin = outward_direction
+			var resource_offset := _random.randf_range(expansion_min_resource_distance, expansion_min_resource_distance + 128.0)
+			candidate = vein.global_position + from_origin * resource_offset
+		else:
+			var direction := outward_direction.rotated(_random.randf_range(-0.95, 0.95))
+			candidate = origin + direction * distance
+
 		if candidate.distance_to(origin) < minimum_distance:
 			continue
+
 		var navigation_path: Array[Vector2] = []
 		if terrain_map != null:
 			var candidate_cell := terrain_map.world_to_cell(candidate)
-			if not terrain_map.is_inside(candidate_cell) or not terrain_map.is_traversable(terrain_map.get_tile(candidate_cell)):
+			var inside = terrain_map.is_inside(candidate_cell)
+			var traversable = terrain_map.is_traversable(terrain_map.get_tile(candidate_cell))
+
+			if not inside or not traversable:
 				continue
-			navigation_path = terrain_map.find_path(builder.global_position, candidate, 20.0, builder)
-			if navigation_path.is_empty() or not _is_clear_spawner_site(terrain_map, candidate):
+
+			navigation_path = terrain_map.find_path(builder.global_position, candidate, 20.0, builder, &"expansion_site")
+			if navigation_path.is_empty() or not _is_clear_spawner_site(terrain_map, candidate, footprint_scale):
 				continue
 		else:
 			navigation_path.append(candidate)
+
 		var too_close := false
 		for building_value in faction["buildings"]:
 			if not is_instance_valid(building_value) or not building_value is EnemySpawnerBuilding:
@@ -439,14 +771,23 @@ func _find_expansion_position(faction: Dictionary, builder: Entity) -> Variant:
 				break
 		if too_close:
 			continue
+
+		if not _is_far_enough_from_resources(candidate, resource_veins):
+			continue
+
 		var score := navigation_path.size() * 2.0
-		score += _expansion_site_danger_score(faction, candidate, navigation_path)
+		score += _expansion_site_resource_score(candidate, resource_veins)
+		score += _expansion_site_danger_score(faction, candidate, navigation_path, 1.75 if for_supply else 1.0)
+		if for_supply:
+			score += _expansion_site_protection_score(faction, candidate)
+
 		if score < best_score:
 			best_score = score
 			best_candidate = candidate
+
 	return best_candidate
 
-func _expansion_site_danger_score(faction: Dictionary, candidate: Vector2, navigation_path: Array[Vector2]) -> float:
+func _expansion_site_danger_score(faction: Dictionary, candidate: Vector2, navigation_path: Array[Vector2], risk_multiplier: float = 1.0) -> float:
 	var own_team: TeamComponent.Team = faction["team"]
 	var score := 0.0
 	var enemy_buildings: Array[EnemySpawnerBuilding] = []
@@ -461,15 +802,16 @@ func _expansion_site_danger_score(faction: Dictionary, candidate: Vector2, navig
 		var distance_to_site := candidate.distance_to(enemy_building.global_position)
 		var danger_radius := maxf(enemy_building.territory_radius, 120.0)
 		if distance_to_site < danger_radius:
-			# Building inside enemy territory is a last-resort location.
-			score += 20000.0 + (danger_radius - distance_to_site) * 100.0
+			# Enemy proximity is a risk, not an absolute directional ban. A rich
+			# resource can justify a forward outpost, especially with escorts.
+			score += (5000.0 + (danger_radius - distance_to_site) * 40.0) * expansion_enemy_risk_weight * risk_multiplier
 		elif distance_to_site < danger_radius * 2.0:
-			score += (danger_radius * 2.0 - distance_to_site) * 12.0
+			score += (danger_radius * 2.0 - distance_to_site) * 6.0 * expansion_enemy_risk_weight * risk_multiplier
 
 		for path_point in navigation_path:
 			var distance_to_route := path_point.distance_to(enemy_building.global_position)
 			if distance_to_route < danger_radius:
-				score += 10000.0
+				score += 2500.0 * expansion_enemy_risk_weight * risk_multiplier
 				break
 
 	var nearby_enemy_ids: Dictionary = {}
@@ -482,8 +824,43 @@ func _expansion_site_danger_score(faction: Dictionary, candidate: Vector2, navig
 			if nearby_team == null or nearby_team.team == own_team or nearby_entity.grounded:
 				continue
 			nearby_enemy_ids[nearby_entity.get_instance_id()] = true
-	score += float(nearby_enemy_ids.size()) * 900.0
+	score += float(nearby_enemy_ids.size()) * 450.0 * expansion_enemy_risk_weight * risk_multiplier
 	return score
+
+func _expansion_site_protection_score(faction: Dictionary, candidate: Vector2) -> float:
+	var nearest_friendly_distance := INF
+	for building_value in faction["buildings"]:
+		if is_instance_valid(building_value) and building_value is EnemySpawnerBuilding:
+			nearest_friendly_distance = minf(nearest_friendly_distance, candidate.distance_to((building_value as EnemySpawnerBuilding).global_position))
+	return minf(nearest_friendly_distance, 600.0) * 2.0
+
+func _get_live_resource_veins() -> Array[Node2D]:
+	var veins: Array[Node2D] = []
+	for candidate in get_tree().get_nodes_in_group("ore_veins"):
+		if candidate is Node2D and is_instance_valid(candidate) and float(candidate.get("ore")) > 1.0:
+			veins.append(candidate as Node2D)
+	return veins
+
+func _expansion_site_resource_score(candidate: Vector2, resource_veins: Array[Node2D]) -> float:
+	if resource_veins.is_empty():
+		return 0.0
+	var best_resource_score := 0.0
+	for vein in resource_veins:
+		var distance_to_vein := candidate.distance_to(vein.global_position)
+		if distance_to_vein > expansion_resource_attraction_radius:
+			continue
+		# Prefer a useful working distance rather than placing the building on
+		# top of the vein or making its footprint awkward for workers.
+		var ideal_distance := maxf(float(vein.get("harvest_radius")) + 110.0, 144.0)
+		var closeness := 1.0 - absf(distance_to_vein - ideal_distance) / expansion_resource_attraction_radius
+		best_resource_score = maxf(best_resource_score, clampf(closeness, 0.0, 1.0))
+	return -best_resource_score * expansion_resource_attraction_weight
+
+func _is_far_enough_from_resources(candidate: Vector2, resource_veins: Array[Node2D]) -> bool:
+	for vein in resource_veins:
+		if candidate.distance_to(vein.global_position) < expansion_min_resource_distance:
+			return false
+	return true
 
 func _query_entities_near(center: Vector2, radius: float) -> Array[Entity]:
 	var indexes := get_tree().get_nodes_in_group("entity_spatial_indexes")
@@ -495,10 +872,18 @@ func _query_entities_near(center: Vector2, radius: float) -> Array[Entity]:
 			results.append(candidate as Entity)
 	return results
 
-func _is_clear_spawner_site(terrain_map: TerrainMap, center: Vector2) -> bool:
-	# A spawner is wider than one navigation cell. Check its footprint corners
-	# so a valid path point cannot place the building partly inside stone.
-	for offset in [Vector2(-30.0, -24.0), Vector2(30.0, -24.0), Vector2(-30.0, 24.0), Vector2(30.0, 24.0)]:
+func _is_clear_spawner_site(terrain_map: TerrainMap, center: Vector2, footprint_scale: float = 1.0) -> bool:
+	# Validate the scaled building footprint plus a walkable perimeter. The
+	# perimeter keeps a completed building from pinning its Builder between the
+	# structure and a stone tile, which the old four-corner check could allow.
+	var half_width := 30.0 * footprint_scale + 28.0
+	var half_height := 24.0 * footprint_scale + 28.0
+	var offsets := [
+		Vector2(-half_width, -half_height), Vector2(0.0, -half_height), Vector2(half_width, -half_height),
+		Vector2(-half_width, 0.0), Vector2(half_width, 0.0),
+		Vector2(-half_width, half_height), Vector2(0.0, half_height), Vector2(half_width, half_height),
+	]
+	for offset in offsets:
 		var cell := terrain_map.world_to_cell(center + offset)
 		if not terrain_map.is_inside(cell) or not terrain_map.is_traversable(terrain_map.get_tile(cell)):
 			return false
@@ -535,7 +920,7 @@ func _update_expansions(delta: float) -> void:
 			if movement.is_moving():
 				continue
 			if builder.global_position.distance_to(position) <= 48.0:
-				expansion["site"] = _create_construction_site(expansion["faction_index"], position)
+				expansion["site"] = _create_construction_site(expansion["faction_index"], position, expansion.get("building_type", EnemySpawnerBuilding.BuildingType.MAIN))
 				expansion["remaining"] = construction_duration
 				if alert != null:
 					alert.set_construction_active(true)
@@ -572,23 +957,37 @@ func _update_expansions(delta: float) -> void:
 			site.set_construction_progress(1.0 - float(expansion["remaining"]) / construction_duration)
 			if expansion["remaining"] <= 0.0:
 				alert.set_construction_active(false)
-				site.complete_construction(_random.randi_range(2, 5))
+				var building_type: int = expansion.get("building_type", EnemySpawnerBuilding.BuildingType.MAIN)
+				site.complete_construction(0 if building_type == EnemySpawnerBuilding.BuildingType.SUPPLY else _random.randi_range(2, 5))
 				_expansions.remove_at(index)
 
-func _create_construction_site(faction_index: int, position: Vector2) -> EnemySpawnerBuilding:
+func _create_construction_site(faction_index: int, position: Vector2, building_type: int = EnemySpawnerBuilding.BuildingType.MAIN) -> EnemySpawnerBuilding:
 	var faction: Dictionary = _factions[faction_index]
 	var site := building_scene.instantiate() as EnemySpawnerBuilding
 	if site == null:
 		return null
 	site.faction_name = faction["label"]
 	site.faction_team = faction["team"]
+	site.autonomous = bool(faction.get("autonomous", true))
+	site.auto_train = bool(faction.get("autonomous", true))
+	site.building_type = building_type
+	if building_type == EnemySpawnerBuilding.BuildingType.SUPPLY:
+		site.supply_bonus = supply_building_bonus
+		site.footprint_scale = supply_building_footprint_scale
+		site.construction_max_health = supply_building_health
+	elif building_type == EnemySpawnerBuilding.BuildingType.BARRACKS:
+		site.footprint_scale = barracks_building_footprint_scale
+		site.construction_max_health = barracks_building_health
+	else:
+		site.footprint_scale = main_building_footprint_scale
 	site.max_active_enemies = 0
 	site.builder_chance = 0.08
 	site.under_construction = true
 	# Construction is completed from the safe perimeter, not by forcing the
 	# worker into the building's solid collision footprint.
 	site.construction_presence_radius = 112.0
-	site.construction_max_health = building_health
+	if building_type == EnemySpawnerBuilding.BuildingType.MAIN:
+		site.construction_max_health = building_health
 	var territory := faction["territory"] as Node2D
 	site.set_shared_territory_owner(territory)
 	site.respawn_delay = 5.0
@@ -629,6 +1028,10 @@ func _is_reserved_for_expansion(unit: Entity) -> bool:
 func _find_terrain_map() -> TerrainMap:
 	var maps := get_tree().get_nodes_in_group("terrain_maps")
 	return null if maps.is_empty() else maps[0] as TerrainMap
+
+func _get_active_world_seed() -> int:
+	var seed_provider := get_node_or_null("/root/WorldSeed")
+	return 0 if seed_provider == null else int(seed_provider.call("get_seed"))
 
 func _update_war_states() -> void:
 	for faction_index in range(_factions.size()):
@@ -671,6 +1074,8 @@ func _enforce_builder_cap(source_building: EnemySpawnerBuilding) -> void:
 	for faction in _factions:
 		if not faction["buildings"].has(source_building):
 			continue
+		if not bool(faction.get("autonomous", true)):
+			return
 		var builders: Array[Entity] = []
 		for building_value in faction["buildings"]:
 			if not is_instance_valid(building_value) or not building_value is EnemySpawnerBuilding:

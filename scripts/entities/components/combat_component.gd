@@ -23,8 +23,8 @@ const AUTO_HOLD_POSITION := AutoTargetMode.HOLD_POSITION
 @export var projectile_damage := 20.0
 @export var projectile_radius := 6.0
 @export var auto_target_mode := AutoTargetMode.ATTACK_MOVE
-@export_range(0.05, 0.5, 0.01) var target_scan_interval := 0.12
-@export_range(0.05, 0.5, 0.01) var line_of_sight_check_interval := 0.1
+@export_range(0.05, 0.5, 0.01) var target_scan_interval := 0.25
+@export_range(0.05, 0.5, 0.01) var line_of_sight_check_interval := 0.2
 
 var target: Entity
 var _cooldown := 0.0
@@ -176,6 +176,9 @@ func is_manual_move_active() -> bool:
 
 func acquire_nearest_visible_unit() -> bool:
 	return _acquire_nearest_visible_unit()
+
+func acquire_nearest_visible_target() -> bool:
+	return _acquire_nearest_visible_target()
 
 func set_auto_target_mode(new_mode: int) -> void:
 	auto_target_mode = new_mode

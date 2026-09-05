@@ -28,6 +28,7 @@ var _stalemate_escape_attempted := false
 var _stalemate_resume_destination: Variant = null
 var _issuing_stalemate_escape := false
 var _escape_collision_teammates: Array[Entity] = []
+var _soft_collision_teammates: Array[Entity] = []
 var _blocked_destination: Variant = null
 var _blocked_destination_remaining := 0.0
 
@@ -41,6 +42,15 @@ var _blocked_destination_remaining := 0.0
 func _physics_process(_delta: float) -> void:
 	if entity == null:
 		return
+	var profiling := DeepProfiler.is_enabled()
+	var soft_collision_started_usec := Time.get_ticks_usec() if profiling else 0
+	_update_soft_teammate_collisions(profiling)
+	if profiling:
+		DeepProfiler.record_timing(
+			"movement.soft_collision_update",
+			Time.get_ticks_usec() - soft_collision_started_usec,
+			entity
+		)
 	destination_marker_remaining = maxf(destination_marker_remaining - _delta, 0.0)
 	_blocked_destination_remaining = maxf(_blocked_destination_remaining - _delta, 0.0)
 	if _blocked_destination_remaining <= 0.0:
@@ -67,8 +77,22 @@ func _physics_process(_delta: float) -> void:
 		movement_speed = minf(movement_speed, _formation_speed_pixels_per_second)
 	entity.velocity = direction * movement_speed
 	if direction != Vector2.ZERO:
+		if profiling:
+			DeepProfiler.increment("movement.active_entity_ticks")
 		entity.push_teammates(direction, entity.velocity.length() * _delta)
+	var move_and_slide_started_usec := Time.get_ticks_usec() if profiling else 0
 	entity.move_and_slide()
+	if profiling:
+		DeepProfiler.record_timing("movement.move_and_slide", Time.get_ticks_usec() - move_and_slide_started_usec, entity)
+	if direction != Vector2.ZERO:
+		# CharacterBody2D contacts between two active entities can otherwise let
+		# the mover's slide resolution carry the other body along. Opposing units
+		# should block and route around one another, never become cargo.
+		for collision_index in range(entity.get_slide_collision_count()):
+			var collider := entity.get_slide_collision(collision_index).get_collider()
+			if collider is Entity and not entity.is_teammate(collider as Entity):
+				entity.global_position = position_before_move
+				break
 	if direction != Vector2.ZERO:
 		_track_progress(position_before_move, _delta)
 	else:
@@ -94,15 +118,24 @@ func set_move_direction(direction: Vector2) -> void:
 	destination_marker_remaining = 0.0
 	move_direction = direction
 
-func move_to(destination: Vector2, arrival_buffer: float = 0.0) -> void:
+func move_to(destination: Vector2, arrival_buffer: float = 0.0, force_repath: bool = false) -> void:
 	if _blocked_destination_remaining > 0.0 and _blocked_destination is Vector2 and (_blocked_destination as Vector2).distance_to(destination) <= 8.0:
 		return
-	_clear_formation_speed()
-	_arrival_buffer = maxf(arrival_buffer, 0.0)
-	_finishing_rotation_direction = Vector2.ZERO
+	var requested_arrival_buffer := maxf(arrival_buffer, 0.0)
 	var previous_destination: Variant = destination_position
 	var is_same_destination := previous_destination is Vector2 and (previous_destination as Vector2).distance_to(destination) <= 2.0
+	var is_same_arrival_buffer := is_equal_approx(_arrival_buffer, requested_arrival_buffer)
+	if not force_repath and is_same_destination and is_same_arrival_buffer and is_moving():
+		if DeepProfiler.is_enabled():
+			DeepProfiler.increment("movement.duplicate_orders_suppressed")
+		return
+	_clear_formation_speed()
+	_arrival_buffer = requested_arrival_buffer
+	_finishing_rotation_direction = Vector2.ZERO
 	if not is_same_destination:
+		RuntimeLogger.debug("%s - move command: destination=(%.1f, %.1f)" % [
+			entity.get_diagnostics_identity(), destination.x, destination.y,
+		])
 		_reset_stuck_tracking()
 		_blocked_destination = null
 		_blocked_destination_remaining = 0.0
@@ -115,7 +148,12 @@ func move_to(destination: Vector2, arrival_buffer: float = 0.0) -> void:
 		# unit's actual circle. Keep the center farther from tile corners than the
 		# nominal clearance or units can vibrate against an obstacle edge.
 		var navigation_clearance := maxf(path_clearance, entity.collision_radius + entity.collision_leeway + 2.0)
-		var path := terrain_map.find_path(entity.global_position, destination, navigation_clearance, entity)
+		var profiling := DeepProfiler.is_enabled()
+		var path_started_usec := Time.get_ticks_usec() if profiling else 0
+		var path := terrain_map.find_path(entity.global_position, destination, navigation_clearance, entity, &"movement")
+		if profiling:
+			DeepProfiler.record_timing("movement.find_path", Time.get_ticks_usec() - path_started_usec, entity)
+			DeepProfiler.increment("movement.path_requests")
 		if path.is_empty():
 			stop()
 			return
@@ -141,6 +179,7 @@ func clear_target() -> void:
 	destination_marker_remaining = 0.0
 
 func stop() -> void:
+	_clear_soft_teammate_collisions()
 	_clear_escape_collision_exceptions()
 	_clear_path()
 	_clear_formation_speed()
@@ -249,16 +288,20 @@ func _track_progress(position_before_move: Vector2, delta: float) -> void:
 
 	if not _stuck_repath_attempted and destination_position != null:
 		_stuck_repath_attempted = true
+		if DeepProfiler.is_enabled():
+			DeepProfiler.increment("movement.stuck_repaths")
 		var blocked_destination := destination_position as Vector2
 		# A dynamic body may have blocked the route since the original path was
 		# calculated. Give the path system one fresh chance before giving up.
-		move_to(blocked_destination, _arrival_buffer)
+		move_to(blocked_destination, _arrival_buffer, true)
 		return
 
 	if not _stalemate_escape_attempted and destination_position != null:
 		var escape_position: Variant = _find_stalemate_escape(destination_position as Vector2)
 		if escape_position != null:
 			_stalemate_escape_attempted = true
+			if DeepProfiler.is_enabled():
+				DeepProfiler.increment("movement.stalemate_escapes")
 			_stalemate_resume_destination = destination_position
 			_issuing_stalemate_escape = true
 			_set_escape_collision_exceptions()
@@ -338,7 +381,7 @@ func _find_stalemate_escape(original_destination: Vector2) -> Variant:
 	var terrain_map := _find_terrain_map()
 	for candidate in candidates:
 		if terrain_map != null:
-			var candidate_path := terrain_map.find_path(entity.global_position, candidate, maxf(path_clearance, entity.collision_radius + entity.collision_leeway + 2.0))
+			var candidate_path := terrain_map.find_path(entity.global_position, candidate, maxf(path_clearance, entity.collision_radius + entity.collision_leeway + 2.0), entity, &"stuck_escape")
 			if candidate_path.is_empty():
 				continue
 		# Teammates are the dynamic blockage this escape is intended to break.
@@ -377,6 +420,47 @@ func _set_escape_collision_exceptions() -> void:
 		entity.set_formation_collision_ignored(teammate, true)
 		teammate.set_formation_collision_ignored(entity, true)
 		_escape_collision_teammates.append(teammate)
+
+func _update_soft_teammate_collisions(profiling: bool = false) -> void:
+	# Two independently moving teammates should not become a pair of mutually
+	# blocking CharacterBodies. Keep stationary/held teammates solid so units
+	# still route around formations and guards, but let active movers pass with
+	# the existing deterministic soft-push behavior.
+	_clear_soft_teammate_collisions(profiling)
+	if not is_moving():
+		return
+	var query_started_usec := Time.get_ticks_usec() if profiling else 0
+	var nearby_entities := entity.get_nearby_entities(entity.collision_radius * 4.0 + 64.0)
+	if profiling:
+		DeepProfiler.record_timing("movement.soft_collision_query", Time.get_ticks_usec() - query_started_usec, entity)
+		DeepProfiler.increment("movement.soft_collision_candidates", nearby_entities.size())
+	for candidate in nearby_entities:
+		if candidate == entity or not candidate is Entity:
+			continue
+		var teammate := candidate as Entity
+		if not entity.is_teammate(teammate) or teammate.grounded or teammate.is_hold_position():
+			continue
+		var teammate_movement := teammate.get_component(MovementComponent) as MovementComponent
+		if teammate_movement == null or not teammate_movement.is_moving():
+			continue
+		if entity.is_formation_collision_ignored(teammate):
+			continue
+		entity.add_collision_exception_with(teammate)
+		teammate.add_collision_exception_with(entity)
+		_soft_collision_teammates.append(teammate)
+		if profiling:
+			DeepProfiler.increment("movement.soft_collision_pairs_added")
+			DeepProfiler.increment("movement.soft_collision_exception_add_calls", 2)
+
+func _clear_soft_teammate_collisions(profiling: bool = false) -> void:
+	var removed := 0
+	for teammate in _soft_collision_teammates:
+		if is_instance_valid(teammate):
+			entity.remove_collision_exception_with(teammate)
+			removed += 1
+	_soft_collision_teammates.clear()
+	if profiling and removed > 0:
+		DeepProfiler.increment("movement.soft_collision_exception_remove_calls", removed)
 
 func _clear_escape_collision_exceptions() -> void:
 	for teammate in _escape_collision_teammates:

@@ -5,7 +5,7 @@ extends EntityComponent
 ## who pursue the attacker briefly, investigate the last known position after
 ## losing line of sight, and finally return to their home territory.
 
-enum State { IDLE, PURSUING, INVESTIGATING, WAITING_AT_LEASH, RETURNING }
+enum State { IDLE, PURSUING, ENGAGING, INVESTIGATING, WAITING_AT_LEASH, RETURNING }
 enum Role { GUARD, PURSUER, FLANKER, BUILDER }
 
 @export var enabled := false
@@ -19,15 +19,19 @@ enum Role { GUARD, PURSUER, FLANKER, BUILDER }
 @export_range(0.05, 0.9, 0.05) var retreat_health_ratio := 0.25
 @export_range(64.0, 2000.0, 8.0) var max_pursuit_distance := 520.0
 @export_range(0.5, 10.0, 0.5) var leash_wait_duration := 2.5
+@export_range(0.5, 20.0, 0.5) var engagement_duration := 8.0
+@export_range(32.0, 400.0, 8.0) var engagement_radius := 220.0
 @export_range(0.4, 0.95, 0.05) var firing_standoff_ratio := 0.7
 @export_range(1.0, 64.0, 1.0) var firing_standoff_tolerance := 20.0
 @export_range(-3.14, 3.14, 0.05) var flank_angle_bias := 0.0
-@export_range(0.05, 0.5, 0.01) var decision_interval := 0.12
+@export_range(0.05, 0.5, 0.01) var decision_interval := 0.25
 
 var state := State.IDLE
 var _attacker: Entity
 var _pursuit_base_angle := 0.0
 var _last_known_position := Vector2.ZERO
+var _engagement_position := Vector2.ZERO
+var _engagement_remaining := 0.0
 var _state_remaining := 0.0
 var _return_position := Vector2.ZERO
 var _search_points: Array[Vector2] = []
@@ -38,9 +42,12 @@ var _combat: CombatComponent
 var _wander: WanderComponent
 var _decision_remaining := 0.0
 var construction_active := false
+var _emergency_defense_active := false
+var _normal_projectile_damage := -1.0
 
 func set_construction_active(active: bool) -> void:
 	construction_active = active
+	_log_ai("construction %s" % ("started" if active else "finished"))
 	if active:
 		var harvest := entity.get_component(HarvestComponent) as HarvestComponent
 		if harvest != null:
@@ -64,6 +71,7 @@ func set_construction_active(active: bool) -> void:
 
 func set_role(new_role: int) -> void:
 	role = clampi(new_role, Role.GUARD, Role.BUILDER)
+	_log_ai("role assigned: %s" % get_role_name(role))
 	match role:
 		Role.GUARD:
 			# Guards protect the local area and give up a chase quickly.
@@ -120,9 +128,21 @@ static func get_role_name(role_value: int) -> String:
 			return "Pursuer"
 
 func get_debug_active_action() -> String:
+	if role == Role.BUILDER:
+		match entity.action_state:
+			Entity.ActionState.HARVESTING:
+				return "Mining ore"
+			Entity.ActionState.WAITING_FOR_RESOURCE:
+				return "Waiting for an available vein"
+			Entity.ActionState.RETURNING_TO_BASE:
+				return "Returning ore to base"
+			Entity.ActionState.CONSTRUCTING:
+				return "Building or repairing"
 	match state:
 		State.PURSUING:
 			return "Pursuing attacker"
+		State.ENGAGING:
+			return "Resolving local engagement"
 		State.INVESTIGATING:
 			return "Searching last known area"
 		State.WAITING_AT_LEASH:
@@ -135,9 +155,23 @@ func get_debug_active_action() -> String:
 			return "Holding position"
 
 func get_debug_next_goal() -> String:
+	if role == Role.BUILDER:
+		match entity.action_state:
+			Entity.ActionState.HARVESTING:
+				return "Finish mining, then return"
+			Entity.ActionState.WAITING_FOR_RESOURCE:
+				return "Switch to a nearby free vein"
+			Entity.ActionState.RETURNING_TO_BASE:
+				return "Deposit ore, then resume work"
+			Entity.ActionState.CONSTRUCTING:
+				return "Finish the construction task"
+			Entity.ActionState.IDLE:
+				return "Find ore or a damaged building"
 	match state:
 		State.PURSUING:
 			return "Close to firing distance"
+		State.ENGAGING:
+			return "Hold area and engage visible hostiles"
 		State.INVESTIGATING:
 			return "Check search points, then return"
 		State.WAITING_AT_LEASH:
@@ -167,6 +201,8 @@ func _physics_process(delta: float) -> void:
 	match state:
 		State.PURSUING:
 			_update_pursuit(delta)
+		State.ENGAGING:
+			_update_engagement(delta)
 		State.INVESTIGATING:
 			_update_investigation(delta)
 		State.WAITING_AT_LEASH:
@@ -179,10 +215,17 @@ func _on_attacked(attacker: Entity) -> void:
 		return
 	if construction_active:
 		return
+	_log_ai("decision: attacked by %s" % attacker.get_diagnostics_identity())
 	if role == Role.BUILDER:
-		_request_faction_defense(attacker)
-		_broadcast_alert(attacker)
-		_begin_return()
+		if _has_available_combat_defender():
+			_request_faction_defense(attacker)
+			_broadcast_alert(attacker)
+			_begin_return()
+		else:
+			# Builders are a last line of defense only. They can buy time when the
+			# faction has no idle combat unit left, but their emergency weapon is
+			# intentionally much weaker than a real combat unit's weapon.
+			_begin_emergency_defense(attacker)
 		return
 	if _is_low_health():
 		_begin_return()
@@ -221,9 +264,10 @@ func _respond_to_alert(attacker: Entity, known_position: Vector2) -> void:
 	if construction_active:
 		return
 	if role == Role.BUILDER:
-		_last_known_position = known_position
-		_begin_return()
-		return
+		if not _emergency_defense_active:
+			_last_known_position = known_position
+			_begin_return()
+			return
 	if _attacker != attacker:
 		_pursuit_base_angle = attacker.global_position.direction_to(entity.global_position).angle()
 	_attacker = attacker
@@ -231,23 +275,37 @@ func _respond_to_alert(attacker: Entity, known_position: Vector2) -> void:
 	_state_remaining = pursuit_duration
 	_decision_remaining = 0.0
 	state = State.PURSUING
+	_log_ai("decision: pursuing %s" % attacker.get_diagnostics_identity())
 	if _wander != null:
 		_wander.enabled = false
 	_combat.set_auto_target_mode(CombatComponent.AUTO_HOLD_POSITION)
 	_combat.set_target(attacker)
 
+func _begin_emergency_defense(attacker: Entity) -> void:
+	if _normal_projectile_damage < 0.0:
+		_normal_projectile_damage = _combat.projectile_damage
+	_emergency_defense_active = true
+	_combat.projectile_damage = minf(_normal_projectile_damage, 6.0)
+	_log_ai("decision: emergency defense against %s" % attacker.get_diagnostics_identity())
+	_broadcast_alert(attacker)
+	_respond_to_alert(attacker, attacker.global_position)
+
+func _has_available_combat_defender() -> bool:
+	var team := entity.get_component(TeamComponent) as TeamComponent
+	if team == null:
+		return false
+	var sandboxes := get_tree().get_nodes_in_group("battle_sandboxes")
+	if sandboxes.is_empty() or not sandboxes[0].has_method("has_available_combat_defender"):
+		return false
+	return bool(sandboxes[0].call("has_available_combat_defender", team.team))
+
 func _update_pursuit(delta: float) -> void:
 	_state_remaining -= delta
 	if not _is_valid_opponent(_attacker):
-		# The original attacker may have died while other enemies are still
-		# standing beside the group. Reacquire an immediately visible unit before
-		# deciding that the alert is over.
-		_combat.clear_target("attacker_lost")
-		if _combat.acquire_nearest_visible_unit():
-			var replacement := _combat.target
-			_respond_to_alert(replacement, replacement.global_position)
-			return
-		_begin_return()
+		# The original attacker may have died while the battle is still active.
+		# Stop treating that individual as the mission objective and resolve the
+		# local hostile presence instead.
+		_begin_engagement(_last_known_position)
 		return
 	if _state_remaining <= 0.0:
 		_begin_investigation()
@@ -270,7 +328,7 @@ func _update_pursuit(delta: float) -> void:
 		# the same approach lane and form an immovable clump.
 		var distance_to_pursuit_position := entity.global_position.distance_to(pursuit_position)
 		if distance_to_pursuit_position > firing_standoff_tolerance:
-			_movement.move_to(pursuit_position)
+			_request_move_if_needed(pursuit_position)
 		else:
 			_movement.stop()
 		return
@@ -278,12 +336,64 @@ func _update_pursuit(delta: float) -> void:
 	# The target is hidden. Chase only the last position we actually observed.
 	_combat.clear_target("lost_los")
 	if entity.global_position.distance_to(_last_known_position) > arrival_distance:
-		_movement.move_to(_last_known_position)
+		_request_move_if_needed(_last_known_position)
 	else:
+		_begin_investigation()
+
+func _begin_engagement(position: Vector2) -> void:
+	_engagement_position = position
+	_engagement_remaining = engagement_duration
+	_attacker = null
+	state = State.ENGAGING
+	_log_ai("state: ENGAGING at %s" % str(position.round()))
+	_decision_remaining = 0.0
+	if _wander != null:
+		_wander.enabled = false
+	_combat.set_auto_target_mode(CombatComponent.AUTO_HOLD_POSITION)
+	_combat.clear_target("original_attacker_resolved")
+	_update_engagement(0.0)
+
+func _update_engagement(delta: float) -> void:
+	_engagement_remaining -= delta
+	if _is_low_health():
+		_begin_return()
+		return
+	if _decision_remaining > 0.0:
+		return
+	_decision_remaining = decision_interval
+
+	# Any visible enemy in weapon range is now a valid combat target. The
+	# original attacker is preferred only while it remains alive; it is not the
+	# condition that ends the faction response.
+	if not is_instance_valid(_combat.target) and _combat.acquire_nearest_visible_target():
+		_engagement_remaining = engagement_duration
+		return
+
+	var hostile_in_area := false
+	for candidate in entity.get_nearby_entities(engagement_radius):
+		if candidate is Entity and _is_valid_opponent(candidate):
+			hostile_in_area = true
+			break
+
+	# Reinforcements converge on the incident briefly, but do not pursue an
+	# enemy indefinitely. Once the area is quiet, investigate the last contact.
+	if entity.global_position.distance_to(_engagement_position) > arrival_distance:
+		if entity.global_position.distance_to(_engagement_position) <= max_pursuit_distance:
+			_request_move_if_needed(_engagement_position)
+		else:
+			_begin_leash_wait()
+		return
+	if hostile_in_area:
+		# A nearby hostile keeps the local incident alive even when terrain or
+		# range currently prevents a shot. The next sensing tick can retarget it.
+		_engagement_remaining = engagement_duration
+		return
+	if _engagement_remaining <= 0.0:
 		_begin_investigation()
 
 func _begin_investigation() -> void:
 	state = State.INVESTIGATING
+	_log_ai("state: INVESTIGATING last known position")
 	_state_remaining = investigate_duration
 	_search_points = _build_search_pattern()
 	_search_index = 0
@@ -300,11 +410,13 @@ func _update_investigation(delta: float) -> void:
 	if not _is_valid_opponent(_attacker):
 		_begin_return()
 		return
-	var terrain_map := _find_terrain_map()
-	var can_see_attacker := terrain_map == null or terrain_map.has_line_of_sight(entity.global_position, _attacker.global_position, _combat.projectile_radius, [_attacker.get_rid()])
-	if can_see_attacker:
-		_respond_to_alert(_attacker, _attacker.global_position)
-		return
+	if _decision_remaining <= 0.0:
+		_decision_remaining = decision_interval
+		var terrain_map := _find_terrain_map()
+		var can_see_attacker := terrain_map == null or terrain_map.has_line_of_sight(entity.global_position, _attacker.global_position, _combat.projectile_radius, [_attacker.get_rid()])
+		if can_see_attacker:
+			_respond_to_alert(_attacker, _attacker.global_position)
+			return
 	if not _movement.is_moving() and _search_destination_active:
 		_search_destination_active = false
 		_search_index += 1
@@ -314,7 +426,9 @@ func _update_investigation(delta: float) -> void:
 
 func _begin_return() -> void:
 	state = State.RETURNING
+	_log_ai("decision: returning to base")
 	_decision_remaining = 0.0
+	_end_emergency_defense()
 	_combat.clear_target("return_to_base")
 	_combat.set_auto_target_mode(CombatComponent.AUTO_HOLD_POSITION)
 	if _wander != null:
@@ -325,6 +439,7 @@ func _begin_return() -> void:
 
 func _begin_leash_wait() -> void:
 	state = State.WAITING_AT_LEASH
+	_log_ai("decision: pursuit leash reached; waiting")
 	_state_remaining = leash_wait_duration
 	_combat.clear_target("pursuit_leash")
 	_combat.set_auto_target_mode(CombatComponent.AUTO_HOLD_POSITION)
@@ -340,9 +455,24 @@ func _update_leash_wait(delta: float) -> void:
 func _update_return() -> void:
 	if _wander != null and entity.global_position.distance_to(_return_position) <= arrival_distance:
 		state = State.IDLE
+		_log_ai("state: IDLE; returned to territory")
 		_attacker = null
 		_combat.set_auto_target_mode(CombatComponent.AUTO_HOLD_POSITION if role == Role.BUILDER else CombatComponent.AUTO_ATTACK_MOVE)
 		_wander.enabled = true
+
+func _request_move_if_needed(destination: Vector2, minimum_repath_distance: float = 32.0) -> void:
+	var current_destination: Variant = _movement.get_destination_position()
+	if _movement.is_moving() and current_destination is Vector2:
+		if (current_destination as Vector2).distance_to(destination) <= minimum_repath_distance:
+			return
+	_movement.move_to(destination)
+
+func _end_emergency_defense() -> void:
+	if not _emergency_defense_active:
+		return
+	_emergency_defense_active = false
+	if _normal_projectile_damage >= 0.0:
+		_combat.projectile_damage = _normal_projectile_damage
 
 func _build_search_pattern() -> Array[Vector2]:
 	var points: Array[Vector2] = [_last_known_position]
@@ -360,6 +490,7 @@ func _move_to_next_search_point() -> void:
 	if _search_index >= _search_points.size():
 		return
 	var destination := _search_points[_search_index]
+	_log_ai("action: searching point %d/%d at %s" % [_search_index + 1, _search_points.size(), str(destination.round())])
 	_movement.move_to(destination)
 	_search_destination_active = _movement.get_destination_position() != null
 	if not _search_destination_active:
@@ -401,6 +532,11 @@ func _is_valid_opponent(candidate: Variant) -> bool:
 	var other_entity := candidate as Entity
 	var other_team := other_entity.get_component(TeamComponent) as TeamComponent
 	return own_team != null and other_team != null and own_team.team != other_team.team
+
+func _log_ai(message: String) -> void:
+	if entity != null:
+		var position := entity.global_position
+		RuntimeLogger.debug("%s, [world=(%8.1f, %8.1f)] - %s" % [entity.get_diagnostics_identity(), position.x, position.y, message])
 
 func _find_terrain_map() -> TerrainMap:
 	var maps := get_tree().get_nodes_in_group("terrain_maps")

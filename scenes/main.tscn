@@ -3,6 +3,7 @@
 [ext_resource type="Script" uid="uid://chtkamdc3t7ny" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" uid="uid://d0nxvdmxiu3nw" path="res://scripts/world/world_stub.gd" id="2_world"]
 [ext_resource type="Script" uid="uid://dnw7pqq6swvlg" path="res://scripts/ui/hud.gd" id="3_hud"]
+[ext_resource type="Texture2D" uid="uid://bnwds4lbangbq" path="res://assets/art/water-sheet.png" id="3_muem4"]
 [ext_resource type="Script" uid="uid://b25jxf2wwa7aj" path="res://scripts/camera/rts_camera.gd" id="4_camera"]
 [ext_resource type="PackedScene" path="res://scenes/entities/character_entity.tscn" id="5_character"]
 [ext_resource type="Script" uid="uid://cypwhtaoofhqk" path="res://scripts/ui/selection_box.gd" id="6_selection_box"]
@@ -13,7 +14,48 @@
 [ext_resource type="Script" uid="uid://bp7dn5ecrmyro" path="res://scripts/world/move_order_markers.gd" id="11_move_markers"]
 [ext_resource type="Script" uid="uid://bh41r01173go" path="res://scripts/world/group_movement_controller.gd" id="12_group_movement"]
 [ext_resource type="Script" uid="uid://c3wfxgl2o1qtj" path="res://scripts/combat/player_unit_spawner.gd" id="13_player_spawner"]
-[ext_resource type="Script" path="res://scripts/world/entity_spatial_index.gd" id="14_spatial_index"]
+[ext_resource type="Script" uid="uid://s0b3jef21inc" path="res://scripts/world/entity_spatial_index.gd" id="14_spatial_index"]
+[ext_resource type="Script" uid="uid://dkxx4vckx864d" path="res://scripts/world/tree_field.gd" id="15_tree_field"]
+[ext_resource type="Script" uid="uid://xc385lynnx5w" path="res://scripts/world/day_night_cycle.gd" id="16_day_night"]
+
+[sub_resource type="Shader" id="Shader_dp3eg"]
+code = "
+shader_type canvas_item;
+
+uniform sampler2D water_sheet : filter_nearest, repeat_disable;
+uniform float frame_seconds = 0.30;
+uniform float water_origin_y = 0.0;
+
+varying vec4 vertex_color;
+
+void vertex() {
+	vertex_color = COLOR;
+}
+
+void fragment() {
+	vec4 base = texture(TEXTURE, UV);
+	bool is_water_marker = base.r > 0.99 && base.g < 0.01 && base.b > 0.99 && base.a > 0.45 && base.a < 0.55;
+	bool is_water_side_marker = base.r > 0.99 && base.g < 0.01 && base.b > 0.99 && base.a > 0.20 && base.a < 0.30;
+	if (is_water_marker || is_water_side_marker) {
+		vec2 pixel = UV * vec2(textureSize(TEXTURE, 0));
+		vec2 tile_uv = fract((pixel - vec2(0.0, water_origin_y)) / 32.0);
+		vec2 tile_cell = vec2(floor(pixel.x / 32.0), floor((pixel.y - water_origin_y + 16.0) / 32.0));
+		float phase = floor(fract(sin(dot(tile_cell, vec2(12.9898, 78.233))) * 43758.5453) * 5.0);
+		float frame = floor(mod(TIME / max(frame_seconds, 0.001) + phase, 5.0));
+		vec2 water_uv = vec2((tile_uv.x + frame) / 5.0, tile_uv.y);
+		float side_shade = is_water_side_marker ? 0.62 : 1.0;
+		COLOR = texture(water_sheet, water_uv) * vertex_color * side_shade;
+	} else {
+		COLOR = base * vertex_color;
+	}
+}
+"
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_0ld40"]
+shader = SubResource("Shader_dp3eg")
+shader_parameter/water_sheet = ExtResource("3_muem4")
+shader_parameter/frame_seconds = 0.35
+shader_parameter/water_origin_y = 37.0
 
 [node name="Main" type="Node2D" unique_id=1433394661]
 script = ExtResource("1_main")
@@ -21,12 +63,23 @@ script = ExtResource("1_main")
 [node name="World" type="Node2D" parent="." unique_id=1469237411]
 script = ExtResource("2_world")
 
-[node name="EntitySpatialIndex" type="Node" parent="." unique_id=1600000006]
-script = ExtResource("14_spatial_index")
-
 [node name="TerrainMap" type="Node2D" parent="World" unique_id=599955606]
 texture_filter = 1
+material = SubResource("ShaderMaterial_0ld40")
 script = ExtResource("7_terrain")
+dynamic_path_avoidance = true
+
+[node name="TreeField" type="Node2D" parent="World" unique_id=599955607]
+script = ExtResource("15_tree_field")
+tree_count = 14
+patch_count = 4
+map_bounds = Rect2(-840, -456, 1680, 912)
+
+[node name="DayNightCycle" type="Node2D" parent="." unique_id=599955608]
+script = ExtResource("16_day_night")
+
+[node name="EntitySpatialIndex" type="Node" parent="." unique_id=1600000006]
+script = ExtResource("14_spatial_index")
 
 [node name="RTSCamera" type="Camera2D" parent="." unique_id=876778534]
 script = ExtResource("4_camera")

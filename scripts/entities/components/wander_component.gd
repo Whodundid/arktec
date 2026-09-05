@@ -113,7 +113,7 @@ func _choose_next_destination() -> void:
 			if not territory_owner.can_wander_to(entity.global_position, candidate, _movement.path_clearance):
 				continue
 		if terrain_map != null:
-			var path := terrain_map.find_path(entity.global_position, candidate, _movement.path_clearance)
+			var path := terrain_map.find_path(entity.global_position, candidate, _movement.path_clearance, entity, &"wander_precheck")
 			if path.is_empty():
 				continue
 			candidate = path.back()

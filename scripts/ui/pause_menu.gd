@@ -6,13 +6,22 @@ extends CanvasLayer
 var _overlay: Control
 var _resume_button: Button
 var _settings_button: Button
+var _logs_button: Button
 var _hint: Label
+var _settings_scroll: ScrollContainer
 var _settings_section: VBoxContainer
 var _camera_speed_slider: HSlider
 var _camera_speed_value: Label
 var _grid_check: CheckButton
 var _tile_details_check: CheckButton
 var _nameplates_check: CheckButton
+var _deep_profiler_check: CheckButton
+var _rebinding_action := ""
+var _keybind_buttons: Dictionary = {}
+const KEYBIND_ACTIONS := [
+	["Train Guard", "train_guard"], ["Train Pursuer", "train_pursuer"], ["Train Flanker", "train_flanker"],
+	["Train Builder", "train_builder"], ["Build Supply", "build_supply"], ["Build Barracks", "build_barracks"], ["Build Command", "build_main"],
+]
 
 func _ready() -> void:
 	# The menu must receive Escape both before and after pausing.
@@ -21,6 +30,19 @@ func _ready() -> void:
 	visible = false
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _rebinding_action.is_empty() == false and event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_ESCAPE:
+			_rebinding_action = ""
+			_update_keybind_buttons()
+		else:
+			var keycode: int = event.keycode if event.keycode != KEY_NONE else event.physical_keycode
+			if _user_settings().set_keybind(_rebinding_action, keycode):
+				_rebinding_action = ""
+				_update_keybind_buttons()
+			else:
+				_hint.text = "That key is already assigned"
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
 		toggle_pause()
 		get_viewport().set_input_as_handled()
@@ -50,7 +72,7 @@ func _build_ui() -> void:
 	_overlay.add_child(center)
 
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(400.0, 500.0)
+	panel.custom_minimum_size = Vector2(430.0, 390.0)
 	panel.add_theme_stylebox_override("panel", _panel_style(Color("101b25f5"), Color("6b9a9d"), 3))
 	center.add_child(panel)
 
@@ -72,12 +94,6 @@ func _build_ui() -> void:
 	title.add_theme_font_size_override("font_size", 28)
 	content.add_child(title)
 
-	var subtitle := Label.new()
-	subtitle.text = "The field is waiting for your orders."
-	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	subtitle.add_theme_color_override("font_color", Color("9cb5b5"))
-	content.add_child(subtitle)
-
 	var spacer := Control.new()
 	spacer.custom_minimum_size.y = 8.0
 	content.add_child(spacer)
@@ -97,10 +113,22 @@ func _build_ui() -> void:
 	_settings_button.pressed.connect(_on_settings_pressed)
 	content.add_child(_settings_button)
 
+	_logs_button = Button.new()
+	_logs_button.text = "OPEN LOG FOLDER"
+	_logs_button.custom_minimum_size.y = 42.0
+	_logs_button.add_theme_font_size_override("font_size", 16)
+	_logs_button.pressed.connect(_on_logs_pressed)
+	content.add_child(_logs_button)
+
 	_settings_section = VBoxContainer.new()
 	_settings_section.add_theme_constant_override("separation", 8)
 	_settings_section.visible = false
-	content.add_child(_settings_section)
+	_settings_scroll = ScrollContainer.new()
+	_settings_scroll.custom_minimum_size.y = 430.0
+	_settings_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_settings_scroll.visible = false
+	content.add_child(_settings_scroll)
+	_settings_scroll.add_child(_settings_section)
 
 	var settings_title := Label.new()
 	settings_title.text = "CAMERA PAN SPEED"
@@ -146,6 +174,44 @@ func _build_ui() -> void:
 	_nameplates_check.toggled.connect(_on_nameplates_toggled)
 	_settings_section.add_child(_nameplates_check)
 
+	var profiling_title := Label.new()
+	profiling_title.text = "PERFORMANCE CAPTURE"
+	profiling_title.add_theme_color_override("font_color", Color("f4d58b"))
+	_settings_section.add_child(profiling_title)
+
+	_deep_profiler_check = CheckButton.new()
+	_deep_profiler_check.text = "Deep movement profiler"
+	_deep_profiler_check.tooltip_text = "Writes detailed movement timings to profile_*.jsonl. Leave off during normal play."
+	_deep_profiler_check.button_pressed = RuntimeLogger.is_deep_profiling_enabled()
+	_deep_profiler_check.toggled.connect(_on_deep_profiler_toggled)
+	_settings_section.add_child(_deep_profiler_check)
+
+	var keybinds_title := Label.new()
+	keybinds_title.text = "COMMAND HOTKEYS"
+	keybinds_title.add_theme_color_override("font_color", Color("f4d58b"))
+	_settings_section.add_child(keybinds_title)
+	for entry in KEYBIND_ACTIONS:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		var label := Label.new()
+		label.text = entry[0]
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		row.add_child(label)
+		var bind_button := Button.new()
+		bind_button.custom_minimum_size = Vector2(126.0, 32.0)
+		bind_button.focus_mode = Control.FOCUS_ALL
+		bind_button.pressed.connect(_begin_rebind.bind(entry[1]))
+		_keybind_buttons[entry[1]] = bind_button
+		row.add_child(bind_button)
+		_settings_section.add_child(row)
+	_update_keybind_buttons()
+
+	var reset_keybinds_button := Button.new()
+	reset_keybinds_button.text = "RESET HOTKEYS"
+	reset_keybinds_button.pressed.connect(_on_reset_keybinds_pressed)
+	_settings_section.add_child(reset_keybinds_button)
+
 	var back_button := Button.new()
 	back_button.text = "BACK"
 	back_button.custom_minimum_size.y = 42.0
@@ -164,16 +230,32 @@ func _on_resume_pressed() -> void:
 func _on_settings_pressed() -> void:
 	_resume_button.visible = false
 	_settings_button.visible = false
+	_logs_button.visible = false
 	_hint.visible = false
+	_settings_scroll.visible = true
 	_settings_section.visible = true
 	_camera_speed_slider.grab_focus()
+	_update_keybind_buttons()
 
 func _on_settings_back_pressed() -> void:
+	_rebinding_action = ""
+	_settings_scroll.visible = false
 	_settings_section.visible = false
 	_resume_button.visible = true
 	_settings_button.visible = true
+	_logs_button.visible = true
 	_hint.visible = true
 	_settings_button.grab_focus()
+
+func _on_logs_pressed() -> void:
+	var log_directory := RuntimeLogger.get_log_directory()
+	var error := OS.shell_show_in_file_manager(log_directory, true)
+	if error != OK:
+		RuntimeLogger.warn("Could not open log directory: path=%s error=%s" % [log_directory, error])
+		_hint.text = "Could not open log folder"
+		return
+	RuntimeLogger.info("Opened log directory: %s" % log_directory)
+	_hint.text = "Log folder opened"
 
 func _on_camera_speed_changed(value: float) -> void:
 	var camera := _get_camera()
@@ -217,10 +299,33 @@ func _on_nameplates_toggled(enabled: bool) -> void:
 	CharacterEntity.show_nameplates = enabled
 	_queue_entity_redraws()
 
+func _on_deep_profiler_toggled(enabled: bool) -> void:
+	RuntimeLogger.set_deep_profiling_enabled(enabled)
+
+func _begin_rebind(action: String) -> void:
+	_rebinding_action = action
+	_hint.text = "Press a key for %s (ESC cancels)" % action.replace("_", " ").to_upper()
+	_update_keybind_buttons()
+
+func _update_keybind_buttons() -> void:
+	for action in _keybind_buttons:
+		var button := _keybind_buttons[action] as Button
+		if button != null:
+			button.text = "PRESS KEY..." if action == _rebinding_action else _user_settings().get_key_name(_user_settings().get_keybind(action))
+
+func _on_reset_keybinds_pressed() -> void:
+	_user_settings().reset_keybinds()
+	_rebinding_action = ""
+	_hint.text = "Hotkeys reset to defaults"
+	_update_keybind_buttons()
+
 func _queue_entity_redraws() -> void:
 	for candidate in get_tree().get_nodes_in_group("entities"):
 		if candidate is Entity:
 			(candidate as Entity).queue_redraw()
+
+func _user_settings() -> Node:
+	return get_node("/root/UserSettings")
 
 func _get_camera() -> Node:
 	var cameras := get_tree().get_nodes_in_group("rts_cameras")

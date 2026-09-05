@@ -4,6 +4,7 @@ extends Node2D
 ## Terrain itself lives in TerrainMap; this node is reserved for mission props.
 
 func _ready() -> void:
+	RuntimeLogger.debug("World landmarks loading")
 	queue_redraw()
 
 func _draw() -> void:

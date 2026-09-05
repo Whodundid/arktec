@@ -21,8 +21,23 @@ func _draw() -> void:
 	draw_circle(Vector2.ZERO, 12.0, team_color.lightened(0.25), false, 2.0)
 	draw_line(facing_direction * 5.0, facing_direction * 17.0, Color("f4d58b"), 3.0)
 	draw_circle(facing_direction * 18.0, 3.0, Color("f4d58b"))
+	_draw_carried_ore_indicator()
 	if show_nameplates:
 		draw_string(ThemeDB.fallback_font, Vector2(-38, 32), display_name, HORIZONTAL_ALIGNMENT_CENTER, 76, 12, Color("dce5df"))
+
+func _draw_carried_ore_indicator() -> void:
+	var alert := get_component(AlertComponent) as AlertComponent
+	var harvest := get_component(HarvestComponent) as HarvestComponent
+	if alert == null or alert.role != AlertComponent.Role.BUILDER or harvest == null or harvest.carried_ore <= 0.0:
+		return
+	# A gold pouch is deliberately offset from the unit body so it remains
+	# readable even when several builders are standing close together.
+	var pouch_center := Vector2(10.0, -10.0)
+	draw_circle(pouch_center, 6.0, Color("17242b"))
+	draw_circle(pouch_center, 4.5, Color("d9a83f"))
+	draw_circle(pouch_center + Vector2(-1.5, -1.0), 1.3, Color("fff0a6"))
+	var amount := str(roundi(harvest.carried_ore))
+	draw_string(ThemeDB.fallback_font, Vector2(14, -13), amount, HORIZONTAL_ALIGNMENT_LEFT, 24, 10, Color("ffe39a"))
 
 func _team_color() -> Color:
 	var team := get_component(TeamComponent) as TeamComponent
