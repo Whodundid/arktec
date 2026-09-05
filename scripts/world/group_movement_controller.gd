@@ -340,7 +340,12 @@ func _confirm_attack_move(selected: Array[Entity], destination: Vector2) -> void
 		_begin_formation_motion(selected, _group_destination as Vector2)
 
 func _try_issue_attack(selected: Array[Entity], world_position: Vector2) -> bool:
-	var leader_combat := selected[0].get_component(CombatComponent) as CombatComponent
+	var leader_combat: CombatComponent
+	for entity in selected:
+		var candidate_combat := entity.get_component(CombatComponent) as CombatComponent
+		if candidate_combat != null:
+			leader_combat = candidate_combat
+			break
 	if leader_combat == null or not leader_combat.try_set_target_at(world_position):
 		return false
 	_group_destination = null
@@ -352,7 +357,13 @@ func _try_issue_attack(selected: Array[Entity], world_position: Vector2) -> bool
 	for index in range(1, selected.size()):
 		var combat := selected[index].get_component(CombatComponent) as CombatComponent
 		if combat != null:
-			combat.set_target(target)
+			combat.set_target(target, false)
+			var movement := selected[index].get_component(MovementComponent) as MovementComponent
+			if movement != null:
+				if selected[index].global_position.distance_to(target.global_position) > combat.attack_range:
+					movement.move_to(target.global_position, combat.attack_range)
+				else:
+					movement.stop()
 	return true
 
 func _issue_move(selected: Array[Entity], destination: Vector2) -> void:

@@ -97,19 +97,32 @@ func _physics_process(delta: float) -> void:
 func try_set_target_at(world_position: Vector2) -> bool:
 	var best_target: Entity = null
 	var best_distance := INF
-	for candidate in entity.get_nearby_entities(28.0):
-		if not candidate is Entity or candidate == entity:
+	# Resolve the click around the cursor, rather than around the attacking unit.
+	# The old query only inspected the leader's 28px neighborhood, so a right
+	# click on any enemy farther away silently became a move order.
+	for candidate in get_tree().get_nodes_in_group("entities"):
+		if not candidate is Entity or candidate == entity or not is_instance_valid(candidate):
 			continue
-		if not _is_opponent(candidate as Entity):
+		var possible_target := candidate as Entity
+		if not _is_opponent(possible_target) or possible_target.get_component(HealthComponent) == null:
 			continue
-		var distance := (candidate as Entity).global_position.distance_to(world_position)
-		if distance <= 28.0 and distance < best_distance:
-			best_target = candidate as Entity
+		var click_radius := maxf(28.0, possible_target.collision_radius + 12.0)
+		var distance := possible_target.global_position.distance_to(world_position)
+		if distance <= click_radius and distance < best_distance:
+			best_target = possible_target
 			best_distance = distance
 
 	if best_target == null:
 		return false
-	set_target(best_target)
+	# An explicit attack replaces the previous order. Close distance when the
+	# target is outside weapon range, then let combat take over on arrival.
+	var movement := entity.get_component(MovementComponent) as MovementComponent
+	set_target(best_target, false)
+	if movement != null:
+		if entity.global_position.distance_to(best_target.global_position) > attack_range:
+			movement.move_to(best_target.global_position, attack_range)
+		else:
+			movement.stop()
 	return true
 
 func arm_attack_move() -> void:
