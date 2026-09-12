@@ -12,9 +12,13 @@ var _drag_current := Vector2.ZERO
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	set_process_input(true)
+	set_process_unhandled_input(true)
+	set_process(true)
 
-func _input(event: InputEvent) -> void:
+func _process(_delta: float) -> void:
+	_update_world_hover(get_viewport().get_mouse_position())
+
+func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			_dragging = true
@@ -45,6 +49,7 @@ func _select_entities_in_box() -> void:
 	var selection_rect := _screen_rect(_drag_start, _drag_current)
 	var unit_selectables: Array[MouseControlComponent] = []
 	var building_selectables: Array[MouseControlComponent] = []
+	var world_selectables: Array[Node2D] = []
 
 	for selectable in get_tree().get_nodes_in_group("mouse_controlled_entities"):
 		if not selectable is MouseControlComponent or not selectable.can_be_selected():
@@ -58,6 +63,13 @@ func _select_entities_in_box() -> void:
 				building_selectables.append(selectable)
 			else:
 				unit_selectables.append(selectable)
+	for candidate in get_tree().get_nodes_in_group("world_selectables"):
+		if not candidate is Node2D or not is_instance_valid(candidate) or not bool(candidate.call("can_be_selected")):
+			continue
+		var world_selectable := candidate as Node2D
+		var selectable_screen_position := get_viewport().get_canvas_transform() * Vector2(world_selectable.call("get_selection_position"))
+		if selection_rect.has_point(selectable_screen_position):
+			world_selectables.append(world_selectable)
 
 	# Marquee selection is unit-first: buildings inside a mixed drag are not
 	# included, so a formation can be selected without accidentally selecting a
@@ -69,6 +81,9 @@ func _select_entities_in_box() -> void:
 			selectable.set_selected(true)
 		return
 	if building_selectables.is_empty():
+		if world_selectables.size() == 1:
+			_clear_selection()
+			world_selectables[0].call("set_selected", true)
 		return
 
 	var box_center := selection_rect.get_center()
@@ -108,11 +123,50 @@ func _select_entity_at(screen_position: Vector2) -> void:
 		_clear_selection()
 		closest.set_selected(true)
 		get_viewport().set_input_as_handled()
+		return
+	var closest_world_selectable: Node2D
+	for candidate in get_tree().get_nodes_in_group("world_selectables"):
+		if not candidate is Node2D or not is_instance_valid(candidate) or not bool(candidate.call("can_be_selected")):
+			continue
+		var world_selectable := candidate as Node2D
+		if not bool(world_selectable.call("contains_world_position", mouse_world_position)):
+			continue
+		var selection_position: Vector2 = world_selectable.call("get_selection_position")
+		var distance := selection_position.distance_squared_to(mouse_world_position)
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_world_selectable = world_selectable
+	if closest_world_selectable != null:
+		_clear_selection()
+		closest_world_selectable.call("set_selected", true)
+		get_viewport().set_input_as_handled()
 
 func _clear_selection() -> void:
 	for selectable in get_tree().get_nodes_in_group("mouse_controlled_entities"):
 		if selectable is MouseControlComponent:
 			selectable.set_selected(false)
+	for selectable in get_tree().get_nodes_in_group("world_selectables"):
+		if selectable is Node2D and is_instance_valid(selectable):
+			selectable.call("set_selected", false)
+
+func _update_world_hover(screen_position: Vector2) -> void:
+	var mouse_world_position := get_viewport().get_canvas_transform().affine_inverse() * screen_position
+	var hovered: Node2D
+	var closest_distance := INF
+	for candidate in get_tree().get_nodes_in_group("world_selectables"):
+		if not candidate is Node2D or not is_instance_valid(candidate) or not bool(candidate.call("can_be_selected")):
+			continue
+		var selectable := candidate as Node2D
+		if not bool(selectable.call("contains_world_position", mouse_world_position)):
+			continue
+		var selection_position: Vector2 = selectable.call("get_selection_position")
+		var distance := selection_position.distance_squared_to(mouse_world_position)
+		if distance < closest_distance:
+			closest_distance = distance
+			hovered = selectable
+	for candidate in get_tree().get_nodes_in_group("world_selectables"):
+		if candidate is Node2D and is_instance_valid(candidate):
+			candidate.call("set_hovered", candidate == hovered)
 
 func _screen_rect(first: Vector2, second: Vector2) -> Rect2:
 	return Rect2(first, second - first).abs()

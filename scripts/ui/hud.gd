@@ -3,13 +3,19 @@ extends Control
 var title_font := ThemeDB.fallback_font
 var small_font := ThemeDB.fallback_font
 const MAX_DISPLAYED_UNITS := 6
-const UNIT_CARD_SIZE := Vector2(72, 36)
-const UNIT_CARD_GAP := 6.0
+const UNIT_CARD_SIZE := Vector2(38, 38)
+const UNIT_CARD_GAP := 4.0
+const BOTTOM_SIDE_HEIGHT := 144.0
+const BOTTOM_MIDDLE_HEIGHT := 96.0
+const BOTTOM_LEFT_WIDTH := 244.0
+const BOTTOM_RIGHT_WIDTH := 240.0
+const BOTTOM_STATS_WIDTH := 210.0
 var _active_inspected_entity: Entity
 var _build_mode := -1
 var _pending_build_position := Vector2.ZERO
 var _pending_build_type := -1
 var _pending_build_builder: Entity
+@export var show_ai_debug := true
 const BUILD_SUPPLY := EnemySpawnerBuilding.BuildingType.SUPPLY
 const BUILD_BARRACKS := EnemySpawnerBuilding.BuildingType.BARRACKS
 const BUILD_MAIN := EnemySpawnerBuilding.BuildingType.MAIN
@@ -28,6 +34,13 @@ func _input(event: InputEvent) -> void:
 	var selected_entities := _selected_entities()
 	var selected_builder := _selected_builder()
 	var selected_building := _selected_player_building()
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and _menu_button_rect().has_point(event.position):
+		if _build_mode >= 0:
+			_build_mode = -1
+		else:
+			_toggle_pause_menu()
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE and _build_mode >= 0:
 		_build_mode = -1
 		get_viewport().set_input_as_handled()
@@ -135,31 +148,51 @@ func _process(_delta: float) -> void:
 func _draw() -> void:
 	@warning_ignore("shadowed_variable_base_class")
 	var size := get_viewport_rect().size
-	var performance_panel := Rect2(28, 28, 190, 88)
+	var top_panels := _top_panel_rects()
+	var performance_panel: Rect2 = top_panels["performance"]
+	var mission_panel: Rect2 = top_panels["mission"]
+	var resources_panel: Rect2 = top_panels["resources"]
+	var clock_panel: Rect2 = top_panels["clock"]
+	var ai_debug_panel: Rect2 = top_panels["debug"]
 
-	draw_style_box(_panel(Color("101b25"), Color("4d6f78")), performance_panel)
-	draw_string(small_font, performance_panel.position + Vector2(12, 22), "FPS: %3d" % RuntimeLogger.get_fps(), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("dce5df"))
-	draw_string(small_font, performance_panel.position + Vector2(12, 42), "UPS: %3d" % RuntimeLogger.get_ups(), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("9cb5b5"))
-	draw_string(small_font, performance_panel.position + Vector2(12, 62), "FRAME: %5.2f ms" % RuntimeLogger.get_frame_time_ms(), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("dce5df"))
-	draw_string(small_font, performance_panel.position + Vector2(12, 77), "PHYS:  %5.2f ms" % RuntimeLogger.get_physics_time_ms(), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("9cb5b5"))
-	draw_string(small_font, performance_panel.position + Vector2(108, 22), "ORE: %d" % ResourceLedger.get_ore(TeamComponent.Team.PLAYER), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("f4d58b"))
+	draw_style_box(_top_panel(Color("101b25"), Color("4d6f78")), performance_panel)
+	draw_style_box(_top_panel(Color("243844"), Color("6b9a9d")), _menu_button_rect())
+	draw_string(small_font, _menu_button_rect().position + Vector2(7, 22), "MENU", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("f4d58b"))
+	draw_string(small_font, performance_panel.position + Vector2(60, 14), "FPS %3d   UPS %3d" % [RuntimeLogger.get_fps(), RuntimeLogger.get_ups()], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("dce5df"))
+	draw_string(small_font, performance_panel.position + Vector2(60, 29), "FRAME %.1fms  PHYS %.1fms" % [RuntimeLogger.get_frame_time_ms(), RuntimeLogger.get_physics_time_ms()], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("9cb5b5"))
 
-	var clock_panel := Rect2(size.x - 240.0, 28.0, 212.0, 70.0)
-	draw_style_box(_panel(Color("101b25"), Color("4d6f78")), clock_panel)
-	draw_string(title_font, clock_panel.position + Vector2(12, 22), "TIME OF DAY", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("f4d58b"))
+	draw_style_box(_top_panel(Color("101b25"), Color("4d6f78")), mission_panel)
+	draw_string(title_font, mission_panel.position + Vector2(6, 14), "MISSION ARTIFACTS", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("f4d58b"))
+	var mission_summary := _get_artifact_mission_summary()
+	draw_string(small_font, mission_panel.position + Vector2(6, 29), "READY %d   BLOCKED %d   BURIED %d   DELIVERED %d" % [int(mission_summary.get("ready", 0)), int(mission_summary.get("blocked", 0)), int(mission_summary.get("buried", 0)), int(mission_summary.get("delivered", 0))], HORIZONTAL_ALIGNMENT_LEFT, mission_panel.size.x - 12.0, 10, Color("dce5df"))
+
+	draw_style_box(_top_panel(Color("101b25"), Color("4d6f78")), resources_panel)
+	_draw_resources_panel(resources_panel)
+
+	draw_style_box(_top_panel(Color("101b25"), Color("4d6f78")), clock_panel)
+	draw_string(title_font, clock_panel.position + Vector2(6, 14), "TIME OF DAY", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("f4d58b"))
 	var day_night_cycles := get_tree().get_nodes_in_group("day_night_cycles")
 	if not day_night_cycles.is_empty():
 		var day_night: Node = day_night_cycles[0]
-		draw_string(small_font, clock_panel.position + Vector2(12, 43), "%s   %s" % [day_night.call("get_time_of_day_text"), day_night.call("get_phase_text")], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("dce5df"))
+		draw_string(small_font, clock_panel.position + Vector2(6, 29), "%s   %s" % [day_night.call("get_time_of_day_text"), day_night.call("get_phase_text")], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("dce5df"))
 		var progress := clampf(float(day_night.call("get_cycle_progress")), 0.0, 1.0)
-		var progress_rect := Rect2(clock_panel.position + Vector2(12, 53), Vector2(clock_panel.size.x - 24.0, 7.0))
+		var progress_rect := Rect2(clock_panel.position + Vector2(6, 33), Vector2(clock_panel.size.x - 14.0, 4.0))
 		draw_rect(progress_rect, Color("243844"), true)
 		draw_rect(Rect2(progress_rect.position, Vector2(progress_rect.size.x * progress, progress_rect.size.y)), Color("d5a15e"), true)
 
 	var buttons := _command_button_rects()
 	var selected_entities := _selected_entities()
-	var right_panel := Rect2(buttons[0].position - Vector2(16, 190), Vector2(332, 232))
-	draw_style_box(_panel(Color("101b25"), Color("4d6f78")), right_panel)
+	var bottom_side_y := size.y - BOTTOM_SIDE_HEIGHT
+	var bottom_middle_y := size.y - BOTTOM_MIDDLE_HEIGHT
+	var left_panel := Rect2(0.0, bottom_side_y, BOTTOM_LEFT_WIDTH, BOTTOM_SIDE_HEIGHT)
+	var middle_panel := Rect2(BOTTOM_LEFT_WIDTH, bottom_middle_y, maxf(size.x - BOTTOM_LEFT_WIDTH - BOTTOM_RIGHT_WIDTH, 0.0), BOTTOM_MIDDLE_HEIGHT)
+	var right_panel := Rect2(maxf(size.x - BOTTOM_RIGHT_WIDTH, BOTTOM_LEFT_WIDTH), bottom_side_y, BOTTOM_RIGHT_WIDTH, BOTTOM_SIDE_HEIGHT)
+	draw_style_box(_top_panel(Color("101b25"), Color("4d6f78")), left_panel)
+	draw_style_box(_top_panel(Color("0d1820"), Color("334d55")), middle_panel)
+	draw_style_box(_top_panel(Color("101b25"), Color("4d6f78")), right_panel)
+	_draw_minimap_placeholder()
+	_draw_bottom_button_reserve()
+	_draw_selected_info_panel()
 
 	var hovered_price_label := ""
 	var hovered_price_cost := 0
@@ -169,7 +202,7 @@ func _draw() -> void:
 
 	if selected_building != null and not training_roles.is_empty():
 		var train_buttons := _train_button_rects()
-		var train_panel := Rect2(train_buttons[0].position - Vector2(8, 12), Vector2(300, 58))
+		var train_panel := Rect2(train_buttons[0].position - Vector2(6, 8), Vector2(270, 42))
 		draw_style_box(_panel(Color("101b25"), Color("4d6f78")), train_panel)
 		var train_labels := _training_labels(selected_building)
 		var train_actions := ["train_guard", "train_pursuer", "train_flanker"] if selected_building.building_type == EnemySpawnerBuilding.BuildingType.BARRACKS else ["train_builder"]
@@ -187,7 +220,7 @@ func _draw() -> void:
 
 	if _build_mode >= 0 and _selected_builder() != null:
 		var build_buttons := _build_button_rects()
-		var build_panel := Rect2(build_buttons[0].position - Vector2(8, 12), Vector2(300, 108))
+		var build_panel := Rect2(build_buttons[0].position - Vector2(6, 8), Vector2(236, 72))
 		draw_style_box(_panel(Color("101b25"), Color("4d6f78")), build_panel)
 		var labels := ["SUPPLY", "BARRACKS", "COMMAND", "RAIL"]
 		var build_actions := ["build_supply", "build_barracks", "build_main", "build_rail"]
@@ -204,43 +237,48 @@ func _draw() -> void:
 		_draw_building_preview()
 	if _pending_build_type >= 0:
 		_draw_building_preview_at(_pending_build_position, _pending_build_type, false)
-	_draw_unit_cards(selected_entities)
+	if not selected_entities.is_empty():
+		_draw_unit_cards(selected_entities)
 
 	var selected_entity := _active_inspected_entity
+	var selected_artifact := _selected_artifact()
 	if selected_entity != null:
 		var unit_name := "UNIT"
 		var display_name = selected_entity.get("display_name")
 		if display_name != null:
 			unit_name = str(display_name)
 		var health := selected_entity.get_component(HealthComponent) as HealthComponent
-		draw_string(title_font, buttons[0].position + Vector2(0, -160), unit_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("f4d58b"))
+		var info_rect := _selected_info_rect()
+		draw_string(title_font, info_rect.position + Vector2(8, 20), unit_name, HORIZONTAL_ALIGNMENT_LEFT, info_rect.size.x - 16.0, 12, Color("f4d58b"))
 		if health != null:
 			var health_text := "HP %d / %d" % [roundi(health.current_health), roundi(health.maximum_health)]
-			draw_string(small_font, buttons[0].position + Vector2(0, -144), health_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("dce5df"))
+			draw_string(small_font, info_rect.position + Vector2(8, 38), health_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("dce5df"))
 		var selected_team := selected_entity.get_component(TeamComponent) as TeamComponent
 		if selected_team != null:
 			var faction_ore := "FACTION ORE %d" % ResourceLedger.get_ore(selected_team.team)
-			draw_string(small_font, buttons[0].position + Vector2(148, -144), faction_ore, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("f4d58b"))
+			draw_string(small_font, info_rect.position + Vector2(8, 55), faction_ore, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("f4d58b"))
 			var sandboxes := get_tree().get_nodes_in_group("battle_sandboxes")
 			if not sandboxes.is_empty() and sandboxes[0].has_method("get_faction_supply"):
 				var supply: Dictionary = sandboxes[0].call("get_faction_supply", selected_team.team)
 				if not supply.is_empty():
 					var supply_text := "SUPPLY %d / %d" % [int(supply.get("current", 0)), int(supply.get("maximum", 0))]
-					draw_string(small_font, buttons[0].position + Vector2(148, -124), supply_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("9ed8e0"))
+					draw_string(small_font, info_rect.position + Vector2(8, 71), supply_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("9ed8e0"))
 		if selected_entity is EnemySpawnerBuilding:
 			var spawner := selected_entity as EnemySpawnerBuilding
 			if spawner.is_training() and spawner.is_training_supply_blocked():
 				var paused_text := "TRAINING PAUSED: SUPPLY   QUEUE %d/%d" % [spawner.get_training_queue_count(), spawner.get_training_queue_limit()]
-				draw_string(small_font, buttons[0].position + Vector2(0, -124), paused_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("e5b85b"))
+				draw_string(small_font, info_rect.position + Vector2(8, 88), paused_text, HORIZONTAL_ALIGNMENT_LEFT, info_rect.size.x - 16.0, 9, Color("e5b85b"))
 			elif spawner.is_training():
 				var training_text := "TRAINING: %s %d%%   QUEUE %d/%d" % [spawner.get_training_role_name(), roundi(spawner.get_training_progress() * 100.0), spawner.get_training_queue_count(), spawner.get_training_queue_limit()]
-				draw_string(small_font, buttons[0].position + Vector2(0, -124), training_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("7fb6df"))
+				draw_string(small_font, info_rect.position + Vector2(8, 88), training_text, HORIZONTAL_ALIGNMENT_LEFT, info_rect.size.x - 16.0, 9, Color("7fb6df"))
 			elif spawner.get_training_queue_count() > 0:
 				var queued_text := "TRAINING PAUSED: SUPPLY   QUEUE %d/%d" % [spawner.get_training_queue_count(), spawner.get_training_queue_limit()]
-				draw_string(small_font, buttons[0].position + Vector2(0, -124), queued_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("e5b85b"))
-	var ai_debug_panel := Rect2(28.0, 130.0, 300.0, 118.0)
-	draw_style_box(_panel(Color("101b25"), Color("4d6f78")), ai_debug_panel)
-	_draw_ai_debug_panel(selected_entity, ai_debug_panel)
+				draw_string(small_font, info_rect.position + Vector2(8, 88), queued_text, HORIZONTAL_ALIGNMENT_LEFT, info_rect.size.x - 16.0, 9, Color("e5b85b"))
+	elif selected_artifact != null:
+		_draw_artifact_details(selected_artifact, buttons[0].position)
+	if show_ai_debug and selected_artifact == null and ai_debug_panel.size.x > 0.0:
+		draw_style_box(_top_panel(Color("101b25"), Color("4d6f78")), ai_debug_panel)
+		_draw_ai_debug_panel(selected_entity, ai_debug_panel)
 	var combat := _selected_combat()
 	if combat != null:
 		_draw_command_button(buttons[0], "ATTACK-MOVE", combat.auto_target_mode == CombatComponent.AUTO_ATTACK_MOVE)
@@ -324,6 +362,49 @@ func _selected_player_buildings() -> Array[EnemySpawnerBuilding]:
 func _user_settings() -> Node:
 	return get_node("/root/UserSettings")
 
+func _menu_button_rect() -> Rect2:
+	return Rect2(4.0, 4.0, 48.0, 32.0)
+
+func _toggle_pause_menu() -> void:
+	var pause_menu := get_tree().root.find_child("PauseMenu", true, false)
+	if pause_menu != null and pause_menu.has_method("toggle_pause"):
+		pause_menu.call("toggle_pause")
+
+func _top_panel_rects() -> Dictionary:
+	var viewport_size := get_viewport_rect().size
+	var top_height := 40.0
+	var performance_width := 190.0
+	var resources_width := 184.0
+	var clock_width := 212.0
+	var middle_width := maxf(viewport_size.x - performance_width - resources_width - clock_width, 0.0)
+	var mission_width := 244.0 if show_ai_debug else middle_width
+	if show_ai_debug:
+		mission_width = minf(mission_width, middle_width)
+	var debug_width := middle_width - mission_width if show_ai_debug else 0.0
+	var x := 0.0
+	var performance := Rect2(x, 0.0, performance_width, top_height)
+	x += performance_width
+	var mission := Rect2(x, 0.0, mission_width, top_height)
+	x += mission_width
+	var debug := Rect2(x, 0.0, debug_width, top_height)
+	x += debug_width
+	var resources := Rect2(x, 0.0, resources_width, top_height)
+	x += resources_width
+	var clock := Rect2(x, 0.0, maxf(viewport_size.x - x, 0.0), top_height)
+	return {"performance": performance, "mission": mission, "debug": debug, "resources": resources, "clock": clock}
+
+func _draw_resources_panel(panel_rect: Rect2) -> void:
+	draw_string(title_font, panel_rect.position + Vector2(6, 14), "RESOURCES", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("f4d58b"))
+	var supply := {}
+	var sandboxes := get_tree().get_nodes_in_group("battle_sandboxes")
+	if not sandboxes.is_empty() and sandboxes[0].has_method("get_faction_supply"):
+		supply = sandboxes[0].call("get_faction_supply", TeamComponent.Team.PLAYER)
+	draw_string(small_font, panel_rect.position + Vector2(6, 29), "ORE %d" % ResourceLedger.get_ore(TeamComponent.Team.PLAYER), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("f4d58b"))
+	var current := int(supply.get("current", 0))
+	var maximum := int(supply.get("maximum", 0))
+	draw_string(small_font, panel_rect.position + Vector2(76, 29), "SUPPLY %d/%d" % [current, maximum], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("9ed8e0"))
+
+
 func _has_training_supply(building: EnemySpawnerBuilding) -> bool:
 	var sandboxes := get_tree().get_nodes_in_group("battle_sandboxes")
 	if building == null or sandboxes.is_empty() or not sandboxes[0].has_method("can_start_unit_training"):
@@ -331,26 +412,27 @@ func _has_training_supply(building: EnemySpawnerBuilding) -> bool:
 	return bool(sandboxes[0].call("can_start_unit_training", building))
 
 func _draw_ai_debug_panel(selected_entity: Entity, panel_rect: Rect2) -> void:
-	draw_string(title_font, panel_rect.position + Vector2(10, 22), "AI DEBUG", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("f4d58b"))
+	draw_string(title_font, panel_rect.position + Vector2(6, 14), "AI DEBUG", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("f4d58b"))
 	if selected_entity == null:
-		draw_string(small_font, panel_rect.position + Vector2(10, 48), "Select an AI unit to inspect", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("9cb5b5"))
+		draw_string(small_font, panel_rect.position + Vector2(6, 29), "Select an AI unit to inspect", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("9cb5b5"))
 		return
 	var alert := selected_entity.get_component(AlertComponent) as AlertComponent
 	if alert == null:
-		draw_string(small_font, panel_rect.position + Vector2(10, 48), "Selected entity has no AI", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("9cb5b5"))
+		draw_string(small_font, panel_rect.position + Vector2(6, 29), "Selected entity has no AI", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("9cb5b5"))
 		return
 	var team := selected_entity.get_component(TeamComponent) as TeamComponent
 	var faction := "Unknown"
 	if team != null:
 		faction = TeamComponent.Team.keys()[team.team].capitalize()
-	draw_string(small_font, panel_rect.position + Vector2(10, 45), "%s   %s" % [faction, AlertComponent.get_role_name(alert.role)], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, selected_entity.selection_color())
-	draw_string(small_font, panel_rect.position + Vector2(10, 66), "Now:  " + alert.get_debug_active_action(), HORIZONTAL_ALIGNMENT_LEFT, panel_rect.size.x, 12, Color("dce5df"))
-	draw_string(small_font, panel_rect.position + Vector2(10, 86), "Next: " + alert.get_debug_next_goal(), HORIZONTAL_ALIGNMENT_LEFT, panel_rect.size.x, 12, Color("9cb5b5"))
+	var column_width := maxf((panel_rect.size.x - 30.0) * 0.25, 70.0)
+	draw_string(small_font, panel_rect.position + Vector2(6, 29), "%s:%s" % [faction, AlertComponent.get_role_name(alert.role)], HORIZONTAL_ALIGNMENT_LEFT, column_width, 10, selected_entity.selection_color())
 	var movement := selected_entity.get_component(MovementComponent) as MovementComponent
 	var destination_text := "none"
 	if movement != null and movement.get_destination_position() is Vector2:
 		destination_text = "(%d, %d)" % [roundi((movement.get_destination_position() as Vector2).x), roundi((movement.get_destination_position() as Vector2).y)]
-	draw_string(small_font, panel_rect.position + Vector2(10, 106), "Destination: " + destination_text, HORIZONTAL_ALIGNMENT_LEFT, panel_rect.size.x, 11, Color("718f91"))
+	draw_string(small_font, panel_rect.position + Vector2(column_width + 12.0, 29), "D:" + destination_text, HORIZONTAL_ALIGNMENT_LEFT, column_width, 10, Color("718f91"))
+	draw_string(small_font, panel_rect.position + Vector2((column_width + 6.0) * 2.0, 29), "N:" + alert.get_debug_active_action(), HORIZONTAL_ALIGNMENT_LEFT, column_width, 10, Color("dce5df"))
+	draw_string(small_font, panel_rect.position + Vector2((column_width + 6.0) * 3.0, 29), "G:" + alert.get_debug_next_goal(), HORIZONTAL_ALIGNMENT_LEFT, column_width, 10, Color("9cb5b5"))
 
 func _group_controller() -> GroupMovementController:
 	var controllers := get_tree().get_nodes_in_group("group_movement_controller")
@@ -364,6 +446,12 @@ func _selected_entity() -> Entity:
 	_sync_active_inspection()
 	return _active_inspected_entity
 
+func _selected_artifact() -> Node2D:
+	for candidate in get_tree().get_nodes_in_group("artifacts"):
+		if candidate is Node2D and is_instance_valid(candidate) and bool(candidate.get("is_selected")):
+			return candidate as Node2D
+	return null
+
 func _selected_entities() -> Array[Entity]:
 	var selected: Array[Entity] = []
 	for candidate in get_tree().get_nodes_in_group("entities"):
@@ -372,17 +460,72 @@ func _selected_entities() -> Array[Entity]:
 	return selected
 
 func _sync_active_inspection() -> void:
+	if _selected_artifact() != null:
+		_active_inspected_entity = null
+		return
 	var selected := _selected_entities()
 	if is_instance_valid(_active_inspected_entity) and _active_inspected_entity.is_selected:
 		return
 	_active_inspected_entity = selected[0] if not selected.is_empty() else null
+
+func _get_artifact_mission_summary() -> Dictionary:
+	var fields := get_tree().get_nodes_in_group("artifact_fields")
+	if fields.is_empty():
+		return {}
+	return fields[0].call("get_mission_summary") as Dictionary
+
+func _draw_artifact_details(artifact: Node2D, origin: Vector2) -> void:
+	var title := "%s ARTIFACT" % str(artifact.call("rarity_name")).to_upper()
+	draw_string(title_font, origin + Vector2(0, -160), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("f4d58b"))
+	var detail_y := -136.0
+	if bool(artifact.get("mission_objective")):
+		draw_string(small_font, origin + Vector2(0, detail_y), "MISSION OBJECTIVE", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("fff2a6"))
+		detail_y += 20.0
+	var protected := bool(artifact.call("is_invulnerable"))
+	var health_text := "PROTECTED WHILE BURIED" if protected else "HP %d / %d" % [roundi(float(artifact.get("current_health"))), roundi(float(artifact.get("maximum_health")))]
+	draw_string(small_font, origin + Vector2(0, detail_y), health_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("9ed8e0") if protected else Color("dce5df"))
+	detail_y += 24.0
+	draw_string(small_font, origin + Vector2(0, detail_y), str(artifact.call("status_text")), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("77e28a") if bool(artifact.call("is_route_ready")) else Color("e5b85b"))
+	detail_y += 24.0
+	var route_values: Array = artifact.call("get_route_path")
+	var route_text := "PATH: --" if route_values.is_empty() else "PATH: %d RAIL CELLS" % route_values.size()
+	draw_string(small_font, origin + Vector2(0, detail_y), route_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("9cb5b5"))
+	detail_y += 22.0
+	var networks := get_tree().get_nodes_in_group("rail_networks")
+	var adjacent_count := 0
+	if not networks.is_empty():
+		var adjacent: Array = networks[0].call("get_operational_adjacent_cells", artifact.get("grid_cell"))
+		adjacent_count = adjacent.size()
+	draw_string(small_font, origin + Vector2(0, detail_y), "OPERATIONAL CONNECTORS: %d" % adjacent_count, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("9cb5b5"))
+
+func _draw_minimap_placeholder() -> void:
+	var size := get_viewport_rect().size
+	var minimap_rect := Rect2(0.0, size.y - BOTTOM_SIDE_HEIGHT, 144.0, 144.0)
+	draw_style_box(_top_panel(Color("17242b"), Color("334d55")), minimap_rect)
+	draw_string(small_font, minimap_rect.position + Vector2(8, 17), "MINIMAP", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("718f91"))
+	draw_string(small_font, minimap_rect.position + Vector2(8, 31), "RESERVED", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color("4d6f78"))
+
+func _draw_bottom_button_reserve() -> void:
+	var size := get_viewport_rect().size
+	var origin := Vector2(150.0, size.y - BOTTOM_SIDE_HEIGHT + 6.0)
+	for index in range(4):
+		var button_rect := Rect2(origin + Vector2(0.0, index * 34.0), Vector2(54.0, 28.0))
+		draw_style_box(_top_panel(Color("17242b"), Color("334d55")), button_rect)
+
+func _draw_selected_info_panel() -> void:
+	var info_rect := _selected_info_rect()
+	if info_rect.size.x <= 0.0:
+		return
+	draw_style_box(_top_panel(Color("101b25"), Color("334d55")), info_rect)
+	if _selected_entity() == null:
+		draw_string(small_font, info_rect.position + Vector2(8, 22), "SELECTED UNIT INFO", HORIZONTAL_ALIGNMENT_LEFT, info_rect.size.x - 16.0, 10, Color("718f91"))
 
 func _unit_card_rects(selected: Array[Entity]) -> Array[Rect2]:
 	var cards: Array[Rect2] = []
 	var displayed_count := mini(selected.size(), MAX_DISPLAYED_UNITS)
 	@warning_ignore("shadowed_variable_base_class")
 	var strip := _unit_strip_rect()
-	var origin := strip.position + Vector2(10.0, 10.0)
+	var origin := strip.position + Vector2(10.0, (strip.size.y - UNIT_CARD_SIZE.y) * 0.5)
 	for index in range(displayed_count):
 		cards.append(Rect2(origin + Vector2(index * (UNIT_CARD_SIZE.x + UNIT_CARD_GAP), 0), UNIT_CARD_SIZE))
 	return cards
@@ -397,64 +540,70 @@ func _draw_unit_cards(selected: Array[Entity]) -> void:
 		var card := cards[index]
 		var active := entity == _active_inspected_entity
 		draw_style_box(_panel(Color("243844") if not active else Color("384c58"), entity.selection_color()), card)
-		draw_circle(card.position + Vector2(12, 12), 5.0, entity.selection_color())
-		var unit_name := str(entity.get("display_name"))
-		draw_string(small_font, card.position + Vector2(22, 16), unit_name, HORIZONTAL_ALIGNMENT_LEFT, 64, 10, Color("dce5df"))
+		var icon_center := card.position + Vector2(card.size.x * 0.5, 16.0)
+		if entity is EnemySpawnerBuilding:
+			draw_rect(Rect2(icon_center - Vector2(8, 8), Vector2(16, 16)), entity.selection_color(), true)
+			draw_rect(Rect2(icon_center - Vector2(8, 8), Vector2(16, 16)), Color("dce5df"), false, 1.0)
+		else:
+			draw_circle(icon_center, 8.0, entity.selection_color())
+			draw_circle(icon_center, 4.0, Color("dce5df"))
 		var health := entity.get_component(HealthComponent) as HealthComponent
 		if health == null:
 			continue
 		var health_ratio := clampf(health.current_health / maxf(health.maximum_health, 1.0), 0.0, 1.0)
-		var bar := Rect2(card.position + Vector2(8, 25), Vector2(card.size.x - 16.0, 5))
+		var bar := Rect2(card.position + Vector2(5, 31), Vector2(card.size.x - 10.0, 4))
 		draw_rect(bar, Color("101b25"), true)
 		draw_rect(Rect2(bar.position, Vector2(bar.size.x * health_ratio, bar.size.y)), entity.selection_color(), true)
 	if selected.size() > MAX_DISPLAYED_UNITS:
-		draw_string(small_font, Vector2(size.x * 0.5 - 28.0, size.y - 15.0), "+%d MORE" % (selected.size() - MAX_DISPLAYED_UNITS), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("9cb5b5"))
+		draw_string(small_font, Vector2(_unit_strip_rect().end.x - 44.0, size.y - 20.0), "+%d" % (selected.size() - MAX_DISPLAYED_UNITS), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("9cb5b5"))
 
 func _unit_strip_rect() -> Rect2:
 	@warning_ignore("shadowed_variable_base_class")
 	var size := get_viewport_rect().size
 	var strip_width := MAX_DISPLAYED_UNITS * UNIT_CARD_SIZE.x + (MAX_DISPLAYED_UNITS - 1) * UNIT_CARD_GAP + 20.0
-	var right_panel_left := _command_button_rects()[0].position.x - 16.0
-	return Rect2(Vector2(right_panel_left - strip_width, size.y - 56.0), Vector2(strip_width, 56.0))
+	var info_rect := _selected_info_rect()
+	var unit_area_right := info_rect.position.x
+	return Rect2(Vector2(BOTTOM_LEFT_WIDTH, size.y - BOTTOM_MIDDLE_HEIGHT), Vector2(maxf(strip_width, unit_area_right - BOTTOM_LEFT_WIDTH), BOTTOM_MIDDLE_HEIGHT))
+
+func _selected_info_rect() -> Rect2:
+	var size := get_viewport_rect().size
+	var middle_right := maxf(size.x - BOTTOM_RIGHT_WIDTH, BOTTOM_LEFT_WIDTH)
+	return Rect2(maxf(BOTTOM_LEFT_WIDTH, middle_right - BOTTOM_STATS_WIDTH), size.y - BOTTOM_MIDDLE_HEIGHT, maxf(middle_right - maxf(BOTTOM_LEFT_WIDTH, middle_right - BOTTOM_STATS_WIDTH), 0.0), BOTTOM_MIDDLE_HEIGHT)
 
 func _command_button_rects() -> Array[Rect2]:
 	@warning_ignore("shadowed_variable_base_class")
 	var size := get_viewport_rect().size
-	# The outer panel is 332x82 with a 16px inset around the buttons.
-	# Position the button origin so the panel itself touches both edges.
-	# Push the outer right edge slightly beyond the viewport so its border is
-	# clipped cleanly at the screen edge.
-	var origin := Vector2(size.x - 300.0, size.y - 42.0)
-	return [Rect2(origin, Vector2(140, 42)), Rect2(origin + Vector2(150, 0), Vector2(140, 42))]
+	var origin := Vector2(size.x - 232.0, size.y - 42.0)
+	return [Rect2(origin, Vector2(108, 32)), Rect2(origin + Vector2(116, 0), Vector2(108, 32))]
 
 func _draw_command_button(rect: Rect2, label: String, active: bool) -> void:
 	var fill := Color("7e4f8f") if active else Color("243844")
 	var border := Color("d5a7df") if active else Color("4d6f78")
 	draw_style_box(_panel(fill, border), rect)
-	draw_string(small_font, rect.position + Vector2(12, 26), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("f4d58b"))
+	draw_string(small_font, rect.position + Vector2(8, 20), label, HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 16.0, 10, Color("f4d58b"))
 
 func _build_button_rects() -> Array[Rect2]:
 	@warning_ignore("shadowed_variable_base_class")
 	var size := get_viewport_rect().size
-	var origin := Vector2(size.x - 300.0, size.y - 160.0)
+	var origin := Vector2(size.x - 232.0, size.y - 106.0)
 	return [
-		Rect2(origin, Vector2(142, 42)),
-		Rect2(origin + Vector2(150, 0), Vector2(142, 42)),
-		Rect2(origin + Vector2(0, 50), Vector2(142, 42)),
-		Rect2(origin + Vector2(150, 50), Vector2(142, 42)),
+		Rect2(origin, Vector2(108, 28)),
+		Rect2(origin + Vector2(116, 0), Vector2(108, 28)),
+		Rect2(origin + Vector2(0, 34), Vector2(108, 28)),
+		Rect2(origin + Vector2(116, 34), Vector2(108, 28)),
 	]
 
 func _train_button_rects() -> Array[Rect2]:
 	@warning_ignore("shadowed_variable_base_class")
 	var size := get_viewport_rect().size
-	var origin := Vector2(size.x - 300.0, size.y - 170.0)
-	return [Rect2(origin, Vector2(92, 42)), Rect2(origin + Vector2(100, 0), Vector2(92, 42)), Rect2(origin + Vector2(200, 0), Vector2(92, 42))]
+	var origin := Vector2(size.x - 232.0, size.y - 76.0)
+	return [Rect2(origin, Vector2(72, 28)), Rect2(origin + Vector2(78, 0), Vector2(72, 28)), Rect2(origin + Vector2(156, 0), Vector2(72, 28))]
 
 func _draw_build_button(rect: Rect2, label: String, active: bool, enabled: bool = true) -> void:
 	var fill := Color("49643f") if active else (Color("243844") if enabled else Color("18252c"))
 	var border := Color("a8d47a") if active else (Color("4d6f78") if enabled else Color("33464d"))
 	draw_style_box(_panel(fill, border), rect)
-	draw_string(small_font, rect.position + Vector2(8, 26), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("f4d58b") if enabled else Color("6d7b7d"))
+	draw_string(small_font, rect.position + Vector2(6, 18), label, HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 12.0, 9, Color("f4d58b") if enabled else Color("6d7b7d"))
 
 func _draw_building_preview() -> void:
 	var sandboxes := get_tree().get_nodes_in_group("battle_sandboxes")
@@ -552,4 +701,12 @@ func _panel(fill: Color, border: Color) -> StyleBoxFlat:
 	style.border_color = border
 	style.set_border_width_all(2)
 	style.set_corner_radius_all(6)
+	return style
+
+func _top_panel(fill: Color, border: Color) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = fill
+	style.border_color = border
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(0)
 	return style
