@@ -11,6 +11,7 @@ const DEFAULT_KEYBINDS := {
 	"build_supply": KEY_A,
 	"build_barracks": KEY_S,
 	"build_main": KEY_D,
+	"build_rail": KEY_R,
 }
 
 var keybinds: Dictionary = DEFAULT_KEYBINDS.duplicate()

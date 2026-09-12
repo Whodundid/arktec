@@ -21,6 +21,7 @@ var _shadow: Sprite2D
 var _scale_factor := 1.0
 
 func _ready() -> void:
+	add_to_group("tree_doodads")
 	if texture == null:
 		return
 	var source_size := texture.get_size()

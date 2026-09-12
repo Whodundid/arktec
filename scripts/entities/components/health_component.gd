@@ -18,6 +18,8 @@ func damage(amount: float, attacker: Variant = null) -> void:
 		return
 	if amount <= 0.0 or current_health <= 0.0:
 		return
+	if _is_friendly_attacker(attacker):
+		return
 	current_health = maxf(current_health - amount, 0.0)
 	health_changed.emit(current_health, maximum_health)
 	damaged.emit(amount, current_health)
@@ -35,6 +37,13 @@ func damage(amount: float, attacker: Variant = null) -> void:
 		# before the entity is removed from the scene tree.
 		if entity != null and is_instance_valid(entity):
 			entity.queue_free()
+
+func _is_friendly_attacker(attacker: Variant) -> bool:
+	if attacker == null or not is_instance_valid(attacker) or not attacker is Entity:
+		return false
+	var own_team := entity.get_component(TeamComponent) as TeamComponent
+	var attacker_team := (attacker as Entity).get_component(TeamComponent) as TeamComponent
+	return own_team != null and attacker_team != null and own_team.team == attacker_team.team
 
 func heal(amount: float) -> void:
 	if entity == null or not entity.is_simulation_authority():

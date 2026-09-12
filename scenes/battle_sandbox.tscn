@@ -15,6 +15,8 @@
 [ext_resource type="Script" uid="uid://xc385lynnx5w" path="res://scripts/world/day_night_cycle.gd" id="12_day_night"]
 [ext_resource type="Script" uid="uid://bp7dn5ecrmyro" path="res://scripts/world/move_order_markers.gd" id="13_move_markers"]
 [ext_resource type="Script" uid="uid://bh41r01173go" path="res://scripts/world/group_movement_controller.gd" id="14_group_movement"]
+[ext_resource type="Script" uid="uid://cgdgtln5x541f" path="res://scripts/world/artifact_field.gd" id="15_artifact_field"]
+[ext_resource type="Script" uid="uid://dyckbsw34mtvr" path="res://scripts/world/rail_network.gd" id="16_rail_network"]
 
 [sub_resource type="Shader" id="Shader_l4on8"]
 code = "
@@ -72,9 +74,17 @@ script = ExtResource("2_terrain")
 columns = 84
 rows = 84
 map_origin = Vector2(-2688, -2688)
+island_world_chance = 0.3
 
 [node name="World" type="Node2D" parent="." unique_id=2027433182]
 script = ExtResource("5_world")
+draw_mission_mockup = false
+
+[node name="ArtifactField" type="Node2D" parent="." unique_id=906919965]
+script = ExtResource("15_artifact_field")
+
+[node name="RailNetwork" type="Node2D" parent="." unique_id=2032985299]
+script = ExtResource("16_rail_network")
 
 [node name="OreField" type="Node2D" parent="." unique_id=2027433183]
 script = ExtResource("10_ore_field")

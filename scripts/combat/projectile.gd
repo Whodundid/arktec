@@ -35,6 +35,10 @@ func _on_body_entered(body: Node2D) -> void:
 		return
 	if body == source:
 		return
+	if body is Entity and _is_friendly_entity(body as Entity):
+		# Friendly units neither take the hit nor consume a projectile intended
+		# for an enemy behind them.
+		return
 	if body == target and body is Entity:
 		_impact_processed = true
 		var target_health := (body as Entity).get_component(HealthComponent) as HealthComponent
@@ -54,6 +58,13 @@ func _on_body_entered(body: Node2D) -> void:
 	_impact_processed = true
 	health.damage(damage, source)
 	queue_free()
+
+func _is_friendly_entity(body: Entity) -> bool:
+	if not is_instance_valid(source):
+		return false
+	var source_team := source.get_component(TeamComponent) as TeamComponent
+	var body_team := body.get_component(TeamComponent) as TeamComponent
+	return source_team != null and body_team != null and source_team.team == body_team.team
 
 func _draw() -> void:
 	draw_circle(Vector2.ZERO, 5.0, Color("f4d58b"))

@@ -22,6 +22,9 @@ const AUTO_HOLD_POSITION := AutoTargetMode.HOLD_POSITION
 @export var projectile_speed := 900.0
 @export var projectile_damage := 20.0
 @export var projectile_radius := 6.0
+@export_range(1, 6, 1) var burst_shot_count := 1
+@export_range(0.02, 0.5, 0.01) var burst_shot_interval := 0.1
+@export var can_fire_while_moving := false
 @export var auto_target_mode := AutoTargetMode.ATTACK_MOVE
 @export_range(0.05, 0.5, 0.01) var target_scan_interval := 0.25
 @export_range(0.05, 0.5, 0.01) var line_of_sight_check_interval := 0.2
@@ -37,6 +40,8 @@ var _target_scan_remaining := 0.0
 var _line_of_sight_remaining := 0.0
 var _cached_line_of_sight := false
 var _cached_line_of_sight_target: Entity
+var _burst_shots_remaining := 0
+var _burst_shot_remaining := 0.0
 
 func on_entity_ready() -> void:
 	# Spread otherwise-identical sensing work across the physics frame instead
@@ -47,6 +52,8 @@ func on_entity_ready() -> void:
 func _physics_process(delta: float) -> void:
 	if _cooldown > 0.0:
 		_cooldown -= delta
+	if _burst_shot_remaining > 0.0:
+		_burst_shot_remaining -= delta
 	_target_scan_remaining = maxf(_target_scan_remaining - delta, 0.0)
 	_line_of_sight_remaining = maxf(_line_of_sight_remaining - delta, 0.0)
 
@@ -63,12 +70,13 @@ func _physics_process(delta: float) -> void:
 		# still react to hostile units they encounter on the way there.
 		if not is_builder and target != null and target.grounded and _target_scan_remaining <= 0.0:
 			_target_scan_remaining = target_scan_interval
-			if _acquire_nearest_visible_unit():
+			if _acquire_nearest_visible_unit() and not can_fire_while_moving:
 				return
-		if not _movement_blocked_last_frame:
-			attack_stopped.emit("moving")
-		_movement_blocked_last_frame = true
-		return
+		if not can_fire_while_moving:
+			if not _movement_blocked_last_frame:
+				attack_stopped.emit("moving")
+			_movement_blocked_last_frame = true
+			return
 	_movement_blocked_last_frame = false
 
 	if target == null:
@@ -91,6 +99,11 @@ func _physics_process(delta: float) -> void:
 		return
 
 	entity.set_facing_direction(entity.global_position.direction_to(target.global_position))
+	if _burst_shots_remaining > 0:
+		if _burst_shot_remaining <= 0.0 and _fire_projectile():
+			_burst_shots_remaining -= 1
+			_burst_shot_remaining = burst_shot_interval
+		return
 	if _cooldown <= 0.0:
 		_fire()
 
@@ -178,6 +191,7 @@ func set_target(new_target: Entity, stop_movement: bool = true) -> void:
 	_attack_move_active = auto_target_mode != AutoTargetMode.HOLD_POSITION
 	_manual_move_active = false
 	_cooldown = 0.0
+	_reset_burst()
 	_los_move_requested = false
 	target_changed.emit(target)
 
@@ -225,9 +239,10 @@ func _acquire_nearest_visible_target() -> bool:
 	if best_target != null:
 		target = best_target
 		var movement := entity.get_component(MovementComponent) as MovementComponent
-		if movement != null:
+		if movement != null and not can_fire_while_moving:
 			movement.stop()
 		_cooldown = 0.0
+		_reset_burst()
 		target_changed.emit(target)
 		return true
 	return false
@@ -253,18 +268,26 @@ func _acquire_nearest_visible_unit() -> bool:
 		return false
 	target = best_target
 	var movement := entity.get_component(MovementComponent) as MovementComponent
-	if movement != null:
+	if movement != null and not can_fire_while_moving:
 		movement.stop()
 	_cooldown = 0.0
+	_reset_burst()
 	target_changed.emit(target)
 	return true
 
 func _fire() -> void:
-	if projectile_scene == null:
+	if not _fire_projectile():
 		return
+	_cooldown = fire_interval
+	_burst_shots_remaining = maxi(burst_shot_count - 1, 0)
+	_burst_shot_remaining = burst_shot_interval
+
+func _fire_projectile() -> bool:
+	if projectile_scene == null:
+		return false
 	var projectile := projectile_scene.instantiate() as Node2D
 	if projectile == null:
-		return
+		return false
 	projectile.global_position = entity.global_position + entity.facing_direction * 18.0
 	projectile.set("direction", entity.facing_direction)
 	projectile.set("speed", projectile_speed)
@@ -273,8 +296,12 @@ func _fire() -> void:
 	projectile.set("source", entity)
 	projectile.set("target", target)
 	get_tree().current_scene.add_child(projectile)
-	_cooldown = fire_interval
 	shot_fired.emit(projectile, target)
+	return true
+
+func _reset_burst() -> void:
+	_burst_shots_remaining = 0
+	_burst_shot_remaining = 0.0
 
 func _is_valid_target() -> bool:
 	return is_instance_valid(target) and _is_opponent(target) and target.get_component(HealthComponent) != null
@@ -326,4 +353,5 @@ func _clear_target(reason: String) -> void:
 	_cached_line_of_sight_target = null
 	_line_of_sight_remaining = 0.0
 	_los_move_requested = false
+	_reset_burst()
 	attack_stopped.emit(reason)

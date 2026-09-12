@@ -72,9 +72,11 @@ func set_construction_active(active: bool) -> void:
 func set_role(new_role: int) -> void:
 	role = clampi(new_role, Role.GUARD, Role.BUILDER)
 	_log_ai("role assigned: %s" % get_role_name(role))
+	_apply_role_stats()
 	match role:
 		Role.GUARD:
 			# Guards protect the local area and give up a chase quickly.
+			retreat_health_ratio = 0.25
 			alert_radius = 320.0
 			pursuit_duration = 3.5
 			investigate_radius = 64.0
@@ -84,7 +86,8 @@ func set_role(new_role: int) -> void:
 			pursuit_spacing = 40.0
 			flank_angle_bias = 0.0
 		Role.PURSUER:
-			# Pursuers use the balanced baseline profile.
+			# Pursuers use the balanced baseline profile and fire on the move.
+			retreat_health_ratio = 0.25
 			alert_radius = 260.0
 			pursuit_duration = 6.0
 			investigate_radius = 96.0
@@ -95,6 +98,7 @@ func set_role(new_role: int) -> void:
 			flank_angle_bias = 0.0
 		Role.FLANKER:
 			# Flankers tolerate a longer chase and approach from a side angle.
+			retreat_health_ratio = 0.25
 			alert_radius = 300.0
 			pursuit_duration = 7.0
 			investigate_radius = 112.0
@@ -115,6 +119,51 @@ func set_role(new_role: int) -> void:
 			pursuit_spacing = 32.0
 			flank_angle_bias = 0.0
 			retreat_health_ratio = 0.75
+
+func _apply_role_stats() -> void:
+	var movement := entity.get_component(MovementComponent) as MovementComponent
+	var combat := entity.get_component(CombatComponent) as CombatComponent
+	var health := entity.get_component(HealthComponent) as HealthComponent
+	var move_speed := 3.0
+	var maximum_health := 100.0
+	var fire_interval := 0.45
+	var projectile_damage := 20.0
+	var burst_count := 1
+	var burst_interval := 0.1
+	var fire_while_moving := false
+
+	match role:
+		Role.GUARD:
+			move_speed = 2.2
+			maximum_health = 170.0
+			fire_interval = 0.9
+			projectile_damage = 45.0
+		Role.PURSUER:
+			move_speed = 3.2
+			fire_while_moving = true
+		Role.FLANKER:
+			move_speed = 4.2
+			maximum_health = 60.0
+			fire_interval = 0.65
+			projectile_damage = 9.0
+			burst_count = 3
+			burst_interval = 0.09
+
+	if movement != null:
+		movement.speed_meters_per_second = move_speed
+	if combat != null:
+		combat.fire_interval = fire_interval
+		combat.projectile_damage = projectile_damage
+		combat.burst_shot_count = burst_count
+		combat.burst_shot_interval = burst_interval
+		combat.can_fire_while_moving = fire_while_moving
+	if health != null:
+		var health_ratio := 1.0
+		if health.maximum_health > 0.0 and health.current_health > 0.0:
+			health_ratio = clampf(health.current_health / health.maximum_health, 0.0, 1.0)
+		health.maximum_health = maximum_health
+		health.current_health = maximum_health * health_ratio
+		health.health_changed.emit(health.current_health, health.maximum_health)
 
 static func get_role_name(role_value: int) -> String:
 	match role_value:

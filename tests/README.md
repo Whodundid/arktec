@@ -10,6 +10,14 @@ Run the opt-in deep-profiler output test with:
 
 `Godot_v4.7.2-stable_win64_console.exe --headless --path C:\Users\Hunter\QoT-Workspace\ArtifactRun res://tests/deep_profiler_test.tscn`
 
+The mission-site visual probe requires a graphics context and writes ship and artifact screenshots to the operating system's temporary directory:
+
+`Godot_v4.7.2-stable_win64_console.exe --path C:\Users\Hunter\QoT-Workspace\ArtifactRun --rendering-method gl_compatibility res://tests/mission_sites_visual_probe.tscn`
+
+Rail placement, construction, junction connectivity, breakage, repair, and artifact adjacency:
+
+`Godot_v4.7.2-stable_win64_console.exe --headless --path C:\Users\Hunter\QoT-Workspace\ArtifactRun res://tests/rail_construction_test.tscn`
+
 The deep movement profiler is disabled by default. Enable it from
 `ESC > Settings > Performance Capture` only for a diagnostic run. Samples are
 written once per second to `profile_*.jsonl` in that run's diagnostics folder.

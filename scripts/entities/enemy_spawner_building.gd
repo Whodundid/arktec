@@ -19,6 +19,9 @@ signal building_destroyed
 @export var display_name := "Enemy Spawner"
 @export var faction_name := "Red Faction"
 @export var faction_team: TeamComponent.Team = TeamComponent.Team.ENEMY
+@export var is_landing_ship := false
+@export var landing_ship_grid_size := Vector2i(3, 4)
+@export var landing_ship_tile_size := 64.0
 @export var spawn_positions := [
 	Vector2(-52, -44),
 	Vector2(52, -44),
@@ -64,8 +67,11 @@ var _training_rally_position: Variant = null
 
 func _ready() -> void:
 	super._ready()
-	scale = Vector2.ONE * footprint_scale
-	display_name = "Supply Depot" if is_supply_building() else ("Barracks" if building_type == BuildingType.BARRACKS else "Command Center")
+	if is_landing_ship:
+		_configure_landing_ship()
+	else:
+		scale = Vector2.ONE * footprint_scale
+	display_name = "Landing Ship" if is_landing_ship else ("Supply Depot" if is_supply_building() else ("Barracks" if building_type == BuildingType.BARRACKS else "Command Center"))
 	_random.randomize()
 	add_to_group("territory_owners")
 	var building_team := get_component(TeamComponent) as TeamComponent
@@ -77,6 +83,25 @@ func _ready() -> void:
 		health.attacked.connect(_on_building_attacked)
 	call_deferred("_spawn_initial_enemies")
 	queue_redraw()
+
+func _configure_landing_ship() -> void:
+	scale = Vector2.ONE
+	var footprint_size := Vector2(landing_ship_grid_size) * landing_ship_tile_size
+	var collider := get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if collider != null and collider.shape is RectangleShape2D:
+		var ship_shape := (collider.shape as RectangleShape2D).duplicate() as RectangleShape2D
+		ship_shape.size = footprint_size
+		collider.shape = ship_shape
+	var half_width := footprint_size.x * 0.5
+	var half_height := footprint_size.y * 0.5
+	var exit_clearance := landing_ship_tile_size * 0.75
+	spawn_positions = [
+		Vector2(-landing_ship_tile_size, half_height + exit_clearance),
+		Vector2(0.0, half_height + exit_clearance),
+		Vector2(landing_ship_tile_size, half_height + exit_clearance),
+		Vector2(-half_width - exit_clearance, half_height * 0.45),
+		Vector2(half_width + exit_clearance, half_height * 0.45),
+	]
 
 func _physics_process(delta: float) -> void:
 	super._physics_process(delta)
@@ -239,7 +264,7 @@ func _spawn_enemy(role_override: int = -1) -> bool:
 		role_color = Color("3f8f5f")
 	enemy.set("body_color", role_color)
 	enemy.collision_layer = 4
-	enemy.collision_mask = 15
+	enemy.collision_mask = 31
 	var team := enemy.get_component(TeamComponent) as TeamComponent
 	if team != null:
 		team.team = faction_team
@@ -284,7 +309,14 @@ func _find_spawn_position(unit: Entity) -> Variant:
 	for offset_value in spawn_positions:
 		if offset_value is Vector2:
 			candidates.append(global_position + (offset_value as Vector2))
-	for distance in [64.0, 80.0, 96.0, 112.0]:
+	var fallback_start := 64.0
+	if is_landing_ship:
+		var ship_half_extent := maxf(
+			float(landing_ship_grid_size.x) * landing_ship_tile_size * 0.5,
+			float(landing_ship_grid_size.y) * landing_ship_tile_size * 0.5
+		)
+		fallback_start = ship_half_extent + unit.collision_radius + unit.collision_leeway + landing_ship_tile_size * 0.5
+	for distance in [fallback_start, fallback_start + 16.0, fallback_start + 32.0, fallback_start + 48.0]:
 		for direction_index in range(8):
 			var angle := float(direction_index) * TAU / 8.0
 			candidates.append(global_position + Vector2.RIGHT.rotated(angle) * distance)
@@ -300,12 +332,19 @@ func _find_spawn_position(unit: Entity) -> Variant:
 	return null
 
 func _is_spawn_position_clear(candidate: Vector2, clearance: float) -> bool:
+	# Newly added bodies do not enter the physics broadphase until the next
+	# physics tick. Check the spawner's live roster directly so a burst of
+	# initial units cannot choose the same authored exit in one frame.
+	for active_enemy in _active_enemies:
+		if is_instance_valid(active_enemy) and active_enemy.global_position.distance_to(candidate) < clearance + active_enemy.collision_radius:
+			return false
 	var shape := CircleShape2D.new()
 	shape.radius = clearance
 	var query := PhysicsShapeQueryParameters2D.new()
 	query.shape = shape
 	query.transform = Transform2D(0.0, candidate)
-	query.collision_mask = 1 | (1 << 3) # Terrain plus solid structures.
+	query.collision_mask = 1 | (1 << 2) | (1 << 3) # Terrain, units, and solid structures.
+	query.exclude = [get_rid()]
 	if not DeepProfiler.is_enabled():
 		return get_world_2d().direct_space_state.intersect_shape(query, 1).is_empty()
 	var started_usec := Time.get_ticks_usec()
@@ -420,11 +459,12 @@ func get_building_approach_position(from_position: Vector2) -> Vector2:
 	var profiling := DeepProfiler.is_enabled()
 	var started_usec := Time.get_ticks_usec() if profiling else 0
 	var candidates: Array[Vector2] = []
-	for offset in [
+	var approach_offsets: Array = spawn_positions if is_landing_ship else [
 		Vector2(-52.0, -44.0), Vector2(0.0, -48.0), Vector2(52.0, -44.0),
 		Vector2(-56.0, 0.0), Vector2(56.0, 0.0),
 		Vector2(-52.0, 44.0), Vector2(0.0, 48.0), Vector2(52.0, 44.0)
-	]:
+	]
+	for offset in approach_offsets:
 		candidates.append(global_position + offset)
 	var terrain_map := _find_terrain_map()
 	var best_position := get_wander_return_position(from_position)
@@ -586,27 +626,32 @@ func _draw() -> void:
 	if under_construction:
 		faction_color = Color("e5b85b")
 	draw_arc(Vector2.ZERO, territory_radius, 0.0, TAU, 64, Color(faction_color, 0.22), 2.0)
-	draw_selection_ring(40.0, 3.0)
-	draw_rect(Rect2(-30, -24, 60, 48), Color("293b46"), true)
-	draw_rect(Rect2(-30, -24, 60, 48), faction_color, false, 3.0)
-	draw_circle(Vector2.ZERO, 13.0, faction_color.darkened(0.35))
-	draw_circle(Vector2.ZERO, 6.0, faction_color.lightened(0.3))
-	if is_supply_building():
+	var visual_size := Vector2(landing_ship_grid_size) * landing_ship_tile_size if is_landing_ship else Vector2(60.0, 48.0)
+	var half_size := visual_size * 0.5
+	draw_selection_ring(maxf(40.0, half_size.length() * 0.76), 3.0)
+	if is_landing_ship:
+		_draw_landing_ship(faction_color, visual_size)
+	else:
+		draw_rect(Rect2(-half_size, visual_size), Color("293b46"), true)
+		draw_rect(Rect2(-half_size, visual_size), faction_color, false, 3.0)
+		draw_circle(Vector2.ZERO, 13.0, faction_color.darkened(0.35))
+		draw_circle(Vector2.ZERO, 6.0, faction_color.lightened(0.3))
+	if not is_landing_ship and is_supply_building():
 		# Compact crate-like mark distinguishes capacity buildings from production
 		# structures even when the world label is not readable.
 		draw_rect(Rect2(-12.0, -8.0, 24.0, 16.0), faction_color.darkened(0.35), true)
 		draw_line(Vector2(-12.0, 0.0), Vector2(12.0, 0.0), faction_color.lightened(0.25), 2.0)
 		draw_line(Vector2.ZERO, Vector2(0.0, 8.0), faction_color.lightened(0.25), 2.0)
-	elif building_type == BuildingType.BARRACKS:
+	elif not is_landing_ship and building_type == BuildingType.BARRACKS:
 		# Simple doorway mark for combat production buildings.
 		draw_rect(Rect2(-7.0, -10.0, 14.0, 20.0), faction_color.darkened(0.35), true)
 	if under_construction:
-		var progress_bar := Rect2(-30.0, -38.0, 60.0, 6.0)
+		var progress_bar := Rect2(-half_size.x, -half_size.y - 14.0, visual_size.x, 6.0)
 		draw_rect(progress_bar, Color("17242b"), true)
 		draw_rect(Rect2(progress_bar.position, Vector2(progress_bar.size.x * construction_progress, progress_bar.size.y)), Color("f4d58b"), true)
 		draw_rect(progress_bar, Color("f4d58b"), false, 1.0)
 	elif is_training():
-		var training_bar := Rect2(-30.0, -38.0, 60.0, 6.0)
+		var training_bar := Rect2(-half_size.x, -half_size.y - 14.0, visual_size.x, 6.0)
 		draw_rect(training_bar, Color("17242b"), true)
 		draw_rect(Rect2(training_bar.position, Vector2(training_bar.size.x * get_training_progress(), training_bar.size.y)), Color("7fb6df"), true)
 		draw_rect(training_bar, Color("7fb6df"), false, 1.0)
@@ -620,8 +665,36 @@ func _draw() -> void:
 			rally_local + Vector2(0.0, -7.0),
 		])
 		draw_colored_polygon(flag_points, Color("f4d58b", 0.9))
-	var label := "Constructing" if under_construction else ("Supply Depot" if is_supply_building() else ("Barracks" if building_type == BuildingType.BARRACKS else "Command Center"))
-	draw_string(ThemeDB.fallback_font, Vector2(-70, 48), label, HORIZONTAL_ALIGNMENT_CENTER, 140, 12, faction_color.lightened(0.25))
+	if not is_landing_ship:
+		var label := "Constructing" if under_construction else ("Supply Depot" if is_supply_building() else ("Barracks" if building_type == BuildingType.BARRACKS else "Command Center"))
+		draw_string(ThemeDB.fallback_font, Vector2(-70, 48), label, HORIZONTAL_ALIGNMENT_CENTER, 140, 12, faction_color.lightened(0.25))
+
+func _draw_landing_ship(faction_color: Color, visual_size: Vector2) -> void:
+	var half := visual_size * 0.5
+	# The collision rectangle and outer footprint are exactly three by four world
+	# cells. The inset hull leaves that alignment readable instead of hiding it.
+	draw_rect(Rect2(-half, visual_size), Color("111a22"), true)
+	for x in range(1, landing_ship_grid_size.x):
+		var grid_x := -half.x + float(x) * landing_ship_tile_size
+		draw_line(Vector2(grid_x, -half.y), Vector2(grid_x, half.y), Color("668090", 0.2), 1.0)
+	for y in range(1, landing_ship_grid_size.y):
+		var grid_y := -half.y + float(y) * landing_ship_tile_size
+		draw_line(Vector2(-half.x, grid_y), Vector2(half.x, grid_y), Color("668090", 0.2), 1.0)
+	var hull := PackedVector2Array([
+		Vector2(0.0, -half.y + 10.0), Vector2(half.x - 16.0, -half.y + 62.0),
+		Vector2(half.x - 12.0, half.y - 28.0), Vector2(half.x - 36.0, half.y - 10.0),
+		Vector2(-half.x + 36.0, half.y - 10.0), Vector2(-half.x + 12.0, half.y - 28.0),
+		Vector2(-half.x + 16.0, -half.y + 62.0),
+	])
+	draw_colored_polygon(hull, Color("293b46"))
+	draw_polyline(hull + PackedVector2Array([hull[0]]), faction_color, 4.0)
+	draw_rect(Rect2(-30.0, -34.0, 60.0, 86.0), faction_color.darkened(0.42), true)
+	draw_rect(Rect2(-22.0, -24.0, 44.0, 26.0), Color("80cce3"), true)
+	draw_circle(Vector2(-48.0, 67.0), 18.0, Color("18242b"))
+	draw_circle(Vector2(48.0, 67.0), 18.0, Color("18242b"))
+	# The lower-center cell is the future rail receiving side.
+	draw_rect(Rect2(-landing_ship_tile_size * 0.34, half.y - 20.0, landing_ship_tile_size * 0.68, 12.0), Color("f4d58b"), true)
+	draw_string(ThemeDB.fallback_font, Vector2(-half.x, half.y + 18.0), "LANDING SHIP", HORIZONTAL_ALIGNMENT_CENTER, visual_size.x, 13, faction_color.lightened(0.2))
 
 func _faction_color() -> Color:
 	match faction_team:

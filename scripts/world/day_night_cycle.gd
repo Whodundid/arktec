@@ -2,12 +2,12 @@ class_name DayNightCycle
 extends Node2D
 
 ## Lightweight world lighting clock. The full cycle is ten minutes by default:
-## six minutes of daylight followed by four minutes of night.
+## seven minutes of daylight followed by three minutes of night.
 
 signal lighting_changed(daylight: float, sun_direction: Vector2)
 
 @export_range(60.0, 1800.0, 10.0) var full_day_length_seconds := 600.0
-@export_range(0.1, 0.9, 0.05) var daylight_ratio := 0.6
+@export_range(0.1, 0.9, 0.05) var daylight_ratio := 0.7
 @export_range(0.0, 1.0, 0.01) var starting_time := 0.18
 @export var night_color := Color(0.34, 0.40, 0.56, 1.0)
 @export var run_in_pause := false

@@ -3,11 +3,15 @@ extends Node2D
 ## World landmarks layered over the procedural terrain map.
 ## Terrain itself lives in TerrainMap; this node is reserved for mission props.
 
+@export var draw_mission_mockup := true
+
 func _ready() -> void:
 	RuntimeLogger.debug("World landmarks loading")
 	queue_redraw()
 
 func _draw() -> void:
+	if not draw_mission_mockup:
+		return
 	var center := Vector2.ZERO
 
 	var outpost := Rect2(center + Vector2(-112, -72), Vector2(224, 144))

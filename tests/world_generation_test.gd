@@ -2,6 +2,7 @@ extends Node
 
 const TERRAIN_MAP_SCRIPT = preload("res://scripts/world/terrain_map.gd")
 const BATTLE_SANDBOX_SCENE = preload("res://scenes/battle_sandbox.tscn")
+const CHARACTER_SCENE = preload("res://scenes/entities/character_entity.tscn")
 
 func _ready() -> void:
 	var water_sheet := load("res://assets/art/water-sheet.png") as Texture2D
@@ -26,6 +27,8 @@ func _ready() -> void:
 				"trees": terrain.get_tree_spawn_positions(),
 				"factions": terrain.get_faction_spawn_positions(),
 				"ore": terrain.get_ore_spawn_positions(),
+				"artifacts": terrain.get_artifact_spawn_cells(),
+				"landing_ship": terrain.get_landing_ship_top_left_cell(),
 			}
 		terrain.queue_free()
 		await get_tree().process_frame
@@ -39,6 +42,8 @@ func _ready() -> void:
 	assert(second.get_tree_spawn_positions() == reference["trees"])
 	assert(second.get_faction_spawn_positions() == reference["factions"])
 	assert(second.get_ore_spawn_positions() == reference["ore"])
+	assert(second.get_artifact_spawn_cells() == reference["artifacts"])
+	assert(second.get_landing_ship_top_left_cell() == reference["landing_ship"])
 	second.queue_free()
 	await get_tree().process_frame
 
@@ -61,6 +66,35 @@ func _ready() -> void:
 	assert(height_shadows.texture != null)
 	assert(get_tree().get_nodes_in_group("territory_owners").size() == 3)
 	assert(get_tree().get_nodes_in_group("ore_veins").size() == 5)
+	var artifacts := get_tree().get_nodes_in_group("artifacts")
+	assert(artifacts.size() >= 1 and artifacts.size() <= 3)
+	var objective_count := 0
+	for artifact in artifacts:
+		assert((artifact as CollisionObject2D).get_collision_layer_value(5))
+		var artifact_collider := artifact.get_node("CollisionShape2D") as CollisionShape2D
+		assert(artifact_collider.shape is RectangleShape2D)
+		assert((artifact_collider.shape as RectangleShape2D).size == Vector2.ONE * sandbox_terrain.tile_size)
+		assert(artifact.get("state") == 0)
+		assert(bool(artifact.call("is_invulnerable")))
+		var health_before: float = artifact.get("current_health")
+		artifact.call("damage", 100.0)
+		assert(is_equal_approx(float(artifact.get("current_health")), health_before))
+		if bool(artifact.get("mission_objective")):
+			objective_count += 1
+	assert(objective_count >= 1)
+	var landing_ships: Array[Node] = []
+	for owner in get_tree().get_nodes_in_group("territory_owners"):
+		if bool(owner.get("is_landing_ship")):
+			landing_ships.append(owner)
+	assert(landing_ships.size() == 1)
+	var landing_ship := landing_ships[0] as CollisionObject2D
+	assert(landing_ship.global_position == sandbox_terrain.get_landing_ship_center())
+	var ship_collider := landing_ship.get_node("CollisionShape2D") as CollisionShape2D
+	assert(ship_collider.shape is RectangleShape2D)
+	assert((ship_collider.shape as RectangleShape2D).size == Vector2(192.0, 256.0))
+	var collision_probe := CHARACTER_SCENE.instantiate() as CollisionObject2D
+	assert(collision_probe.get_collision_mask_value(5))
+	collision_probe.queue_free()
 
 	print("WORLD_GENERATION_TEST_PASS")
 	get_tree().quit(0)
@@ -85,12 +119,36 @@ func _assert_generated_map(terrain: TerrainMap) -> Dictionary:
 	var tree_positions: Array[Vector2] = terrain.get_tree_spawn_positions()
 	var faction_positions: Array[Vector2] = terrain.get_faction_spawn_positions()
 	var ore_positions: Array[Vector2] = terrain.get_ore_spawn_positions()
+	var artifact_cells: Array[Vector2i] = terrain.get_artifact_spawn_cells()
 	assert(tree_positions.size() >= 30)
 	assert(faction_positions.size() == 2)
 	assert(ore_positions.size() >= 5)
+	assert(artifact_cells.size() >= 1 and artifact_cells.size() <= 3)
 	assert(absf(faction_positions[0].x - faction_positions[1].x) >= terrain.tile_size * float(terrain.columns) * 0.35)
 	assert(not terrain.find_path(faction_positions[0], faction_positions[1], 20.0).is_empty())
+	_assert_mission_sites(terrain, artifact_cells, ore_positions)
 	return counts
+
+func _assert_mission_sites(terrain: TerrainMap, artifact_cells: Array[Vector2i], ore_positions: Array[Vector2]) -> void:
+	for index in range(artifact_cells.size()):
+		var cell := artifact_cells[index]
+		assert(terrain.is_inside(cell))
+		assert(terrain.is_traversable(terrain.get_tile(cell)))
+		assert(terrain.world_to_cell(terrain.cell_center(cell)) == cell)
+		for other_index in range(index + 1, artifact_cells.size()):
+			assert(Vector2(cell).distance_to(Vector2(artifact_cells[other_index])) >= 6.0)
+		for ore_position in ore_positions:
+			assert(terrain.cell_center(cell).distance_to(ore_position) >= terrain.tile_size * 2.0)
+	var ship_top_left := terrain.get_landing_ship_top_left_cell()
+	assert(ship_top_left != Vector2i(-1, -1))
+	for y in range(-1, 5):
+		for x in range(-1, 4):
+			var ship_cell := ship_top_left + Vector2i(x, y)
+			assert(terrain.is_inside(ship_cell))
+			assert(terrain.is_traversable(terrain.get_tile(ship_cell)))
+	var ship_center_cell := Vector2(ship_top_left) + Vector2(1.5, 2.0)
+	for artifact_cell in artifact_cells:
+		assert(ship_center_cell.distance_to(Vector2(artifact_cell) + Vector2.ONE * 0.5) >= 18.0)
 
 func _make_map() -> TerrainMap:
 	var terrain := TERRAIN_MAP_SCRIPT.new() as TerrainMap

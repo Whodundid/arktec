@@ -74,13 +74,27 @@ func _input(event: InputEvent) -> void:
 		return
 
 	var world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * event.position
+	var rail_segment := _rail_segment_at(world_position)
+	if rail_segment != null and bool(rail_segment.call("needs_builder_work")):
+		var rail_work_ordered := false
+		var sandboxes := get_tree().get_nodes_in_group("battle_sandboxes")
+		if not sandboxes.is_empty():
+			for entity in selected:
+				var alert := entity.get_component(AlertComponent) as AlertComponent
+				if alert != null and alert.role == AlertComponent.Role.BUILDER:
+					rail_work_ordered = bool(sandboxes[0].call("request_player_rail_work", entity, rail_segment)) or rail_work_ordered
+		if rail_work_ordered:
+			get_viewport().set_input_as_handled()
+			return
 	var target_building := _friendly_building_at(world_position)
 	if target_building != null:
+		_cancel_selected_rail_orders(selected)
 		NetworkSession.submit_command(COMMAND_CONTEXT_ORDER, _entity_ids(selected), {"destination": target_building.global_position, "building_id": target_building.network_entity_id, "formation": formation_enabled})
 		get_viewport().set_input_as_handled()
 		return
 	var vein := _ore_vein_at(world_position)
 	if vein != null:
+		_cancel_selected_rail_orders(selected)
 		var harvest_ordered := false
 		for entity in selected:
 			var alert := entity.get_component(AlertComponent) as AlertComponent
@@ -92,6 +106,7 @@ func _input(event: InputEvent) -> void:
 			return
 	# A right-click on an enemy is an explicit attack order. Right-clicking
 	# elsewhere remains a manual move and ignores enemies encountered in range.
+	_cancel_selected_rail_orders(selected)
 	NetworkSession.submit_command(COMMAND_CONTEXT_ORDER, _entity_ids(selected), {"destination": world_position, "formation": formation_enabled})
 	get_viewport().set_input_as_handled()
 
@@ -109,6 +124,21 @@ func _ore_vein_at(world_position: Vector2) -> OreVein:
 			closest_distance = distance
 			closest = vein
 	return closest
+
+func _rail_segment_at(world_position: Vector2) -> Node2D:
+	var networks := get_tree().get_nodes_in_group("rail_networks")
+	if networks.is_empty():
+		return null
+	return networks[0].call("get_segment_at_world", world_position) as Node2D
+
+func _cancel_selected_rail_orders(selected: Array[Entity]) -> void:
+	var sandboxes := get_tree().get_nodes_in_group("battle_sandboxes")
+	if sandboxes.is_empty():
+		return
+	for entity in selected:
+		var alert := entity.get_component(AlertComponent) as AlertComponent
+		if alert != null and alert.role == AlertComponent.Role.BUILDER:
+			sandboxes[0].call("cancel_player_rail_orders", entity)
 
 func _friendly_building_at(world_position: Vector2) -> EnemySpawnerBuilding:
 	var closest: EnemySpawnerBuilding

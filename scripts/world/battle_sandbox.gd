@@ -11,16 +11,24 @@ const FACTION_TERRITORY_SCRIPT = preload("res://scripts/world/faction_territory.
 @export var building_scene: PackedScene
 @export var units_per_building := [3, 4, 5]
 @export_range(1, 20, 1) var starting_units_per_faction := 2
+@export_range(1, 20, 1) var starting_supply := 5
+@export_range(0.0, 10.0, 0.1) var starting_spawn_jitter := 2.5
 @export_range(2.0, 30.0, 0.5) var wave_interval := 8.0
 @export_range(0.1, 1.0, 0.05) var strategic_tick_interval := 0.25
 @export_range(32.0, 300.0, 1.0) var attack_standoff := 160.0
 @export_range(100.0, 10000.0, 25.0) var building_health := 250.0
+@export_range(100.0, 10000.0, 25.0) var landing_ship_health := 750.0
 @export_range(8.0, 120.0, 1.0) var expansion_check_interval := 18.0
 @export_range(0.0, 1.0, 0.05) var expansion_chance := 0.8
 @export_range(0.1, 1.0, 0.05) var expansion_min_delay_factor := 0.35
 @export_range(1.0, 5.0, 0.05) var expansion_max_delay_factor := 2.75
 @export_range(0.0, 60.0, 1.0) var expansion_min_faction_spacing := 8.0
 @export_range(4.0, 30.0, 1.0) var construction_duration := 10.0
+@export_range(1, 100, 1) var rail_cost := 5
+@export_range(0.25, 10.0, 0.25) var rail_construction_duration := 1.5
+@export_range(1.0, 1000.0, 1.0) var rail_maximum_health := 60.0
+@export_range(0.25, 10.0, 0.25) var rail_repair_duration := 2.5
+@export_range(16.0, 128.0, 1.0) var rail_work_radius := 96.0
 @export_range(7.0, 16.0, 1.0) var expansion_min_distance_tiles := 8.0
 @export_range(2.0, 10.0, 1.0) var expansion_spacing_tiles := 4.0
 @export_range(5.0, 120.0, 5.0) var builder_expansion_cooldown := 45.0
@@ -47,6 +55,7 @@ var _factions: Array[Dictionary] = []
 var _wave_remaining: Array[float] = []
 var _random := RandomNumberGenerator.new()
 var _expansions: Array[Dictionary] = []
+var _rail_orders: Array[Dictionary] = []
 var _builder_cooldowns: Dictionary = {}
 var _attack_targets: Dictionary = {}
 var _ore_security_requests: Dictionary = {}
@@ -93,6 +102,11 @@ func _randomize_starting_positions() -> Array[Vector2]:
 					generated_sites_are_clear = false
 					break
 			if generated_sites_are_clear:
+				if terrain_map.has_method("get_landing_ship_center"):
+					var landing_ship_center: Vector2 = terrain_map.call("get_landing_ship_center")
+					if landing_ship_center != Vector2.ZERO:
+						generated_positions.append(landing_ship_center)
+						return generated_positions
 				var third_position: Variant = _find_third_starting_position(terrain_map, generated_positions)
 				if third_position != null:
 					generated_positions.append(third_position as Vector2)
@@ -180,6 +194,7 @@ func _physics_process(delta: float) -> void:
 		_factions[faction_index] = faction
 
 	_update_expansions(delta)
+	_update_rail_orders(delta)
 
 	if _strategic_tick_remaining <= 0.0:
 		_strategic_tick_remaining = strategic_tick_interval
@@ -211,24 +226,30 @@ func _create_faction(label: String, team: TeamComponent.Team, positions: Array[V
 		building.initial_spawn_role = AlertComponent.Role.GUARD
 		building.initial_spawn_roles = [AlertComponent.Role.BUILDER, AlertComponent.Role.GUARD]
 		building.counts_as_starting_building = true
-		building.footprint_scale = main_building_footprint_scale
+		building.is_landing_ship = team == TeamComponent.Team.PLAYER and index == 0
+		building.footprint_scale = 1.0 if building.is_landing_ship else main_building_footprint_scale
+		if building.is_landing_ship:
+			var terrain_map := _find_terrain_map()
+			if terrain_map != null:
+				building.landing_ship_tile_size = terrain_map.tile_size
 		building.territory_radius = 180.0
 		building.defense_alert_radius = 300.0
 		building.respawn_delay = 5.0
 		building.respawn_jitter = 2.0
-		building.initial_spawn_jitter = 2.5
+		building.initial_spawn_jitter = starting_spawn_jitter
 		building.builder_chance = 0.08
 		building.guarantee_builder = index == 0
 		building.autonomous = autonomous
 		building.auto_train = autonomous
+		building.position = positions[index]
 		add_child(building)
-		building.global_position = positions[index]
 		building.set_shared_territory_owner(territory)
 		territory.call("add_building", building)
 		var health := building.get_component(HealthComponent) as HealthComponent
 		if health != null:
-			health.maximum_health = building_health
-			health.current_health = building_health
+			var maximum_health := landing_ship_health if building.is_landing_ship else building_health
+			health.maximum_health = maximum_health
+			health.current_health = maximum_health
 		building.enemy_spawned.connect(_on_enemy_spawned.bind(building))
 		faction_buildings.append(building)
 	_factions.append({
@@ -286,7 +307,7 @@ func _get_faction_supply_used(faction: Dictionary) -> int:
 	return used
 
 func _get_faction_supply_limit(faction: Dictionary) -> int:
-	var limit := starting_units_per_faction
+	var limit := starting_supply
 	for building_value in faction["buildings"]:
 		if not is_instance_valid(building_value) or not building_value is EnemySpawnerBuilding:
 			continue
@@ -588,7 +609,7 @@ func request_player_construction(builder: Entity, position: Vector2, building_ty
 	if team == null or team.team != TeamComponent.Team.PLAYER or alert == null or alert.role != AlertComponent.Role.BUILDER or alert.state != AlertComponent.State.IDLE:
 		return false
 	var faction := _find_faction_for_team(TeamComponent.Team.PLAYER)
-	if faction.is_empty() or not _find_available_builders(faction, false).has(builder):
+	if faction.is_empty() or not _find_available_builders(faction, false).has(builder) or _find_rail_order_index(builder) >= 0:
 		return false
 	if building_type < EnemySpawnerBuilding.BuildingType.MAIN or building_type > EnemySpawnerBuilding.BuildingType.SUPPLY:
 		return false
@@ -652,9 +673,205 @@ func _find_available_builders(faction: Dictionary, apply_ai_restrictions: bool =
 			var alert := unit.get_component(AlertComponent) as AlertComponent
 			var cooldown := float(_builder_cooldowns.get(unit.get_instance_id(), 0.0)) if apply_ai_restrictions else 0.0
 			var harvest := unit.get_component(HarvestComponent) as HarvestComponent
-			if alert != null and alert.role == AlertComponent.Role.BUILDER and alert.state == AlertComponent.State.IDLE and cooldown <= 0.0 and not _is_reserved_for_expansion(unit) and (harvest == null or harvest.can_start_construction()):
+			if alert != null and alert.role == AlertComponent.Role.BUILDER and alert.state == AlertComponent.State.IDLE and cooldown <= 0.0 and not _is_reserved_for_expansion(unit) and _find_rail_order_index(unit) < 0 and (harvest == null or harvest.can_start_construction()):
 				builders.append(unit)
 	return builders
+
+func get_rail_build_cost() -> int:
+	return rail_cost
+
+func get_rail_cell_center(world_position: Vector2) -> Vector2:
+	var network := _find_rail_network()
+	return world_position if network == null else network.call("cell_center", network.call("world_to_cell", world_position))
+
+func can_place_player_rail(world_position: Vector2) -> bool:
+	var network := _find_rail_network()
+	return network != null and bool(network.call("can_place_rail_at_world", world_position))
+
+func request_player_rail_construction(builder: Entity, world_position: Vector2) -> bool:
+	if not _can_assign_player_builder(builder):
+		return false
+	var network := _find_rail_network()
+	if network == null:
+		return false
+	var cell: Vector2i = network.call("world_to_cell", world_position)
+	if not bool(network.call("can_place_rail_cell", cell)):
+		return false
+	if not ResourceLedger.spend_ore(TeamComponent.Team.PLAYER, rail_cost):
+		return false
+	var segment := network.call("create_construction_site", cell, rail_maximum_health) as Node2D
+	if segment == null:
+		ResourceLedger.add_ore(TeamComponent.Team.PLAYER, rail_cost)
+		return false
+	var task := {
+		"kind": "build",
+		"segment_id": segment.get_instance_id(),
+		"remaining": rail_construction_duration,
+		"total": rail_construction_duration,
+		"start_progress": 0.0,
+	}
+	_queue_rail_task(builder, task)
+	return true
+
+func request_player_rail_work(builder: Entity, segment: Node2D) -> bool:
+	if not _can_assign_player_builder(builder) or not is_instance_valid(segment) or not bool(segment.call("needs_builder_work")):
+		return false
+	if _rail_segment_is_assigned(segment):
+		return false
+	var under_construction: bool = segment.get("under_construction")
+	var task: Dictionary
+	if under_construction:
+		var start_progress: float = segment.get("construction_progress")
+		var duration := rail_construction_duration * (1.0 - start_progress)
+		task = {
+			"kind": "build",
+			"segment_id": segment.get_instance_id(),
+			"remaining": duration,
+			"total": maxf(duration, 0.01),
+			"start_progress": start_progress,
+		}
+	else:
+		var maximum_health: float = segment.get("maximum_health")
+		var current_health: float = segment.get("current_health")
+		var missing_ratio := 1.0 - current_health / maxf(maximum_health, 1.0)
+		var duration := rail_repair_duration * missing_ratio
+		task = {
+			"kind": "repair",
+			"segment_id": segment.get_instance_id(),
+			"remaining": duration,
+			"total": maxf(duration, 0.01),
+			"start_health": current_health,
+		}
+	_queue_rail_task(builder, task)
+	return true
+
+func cancel_player_rail_orders(builder: Entity) -> bool:
+	var index := _find_rail_order_index(builder)
+	if index < 0:
+		return false
+	_rail_orders.remove_at(index)
+	var alert := builder.get_component(AlertComponent) as AlertComponent
+	if alert != null:
+		alert.set_construction_active(false)
+	return true
+
+func _can_assign_player_builder(builder: Entity) -> bool:
+	if not NetworkSession.is_simulation_authority() or not is_instance_valid(builder):
+		return false
+	var team := builder.get_component(TeamComponent) as TeamComponent
+	var alert := builder.get_component(AlertComponent) as AlertComponent
+	if team == null or team.team != TeamComponent.Team.PLAYER or alert == null or alert.role != AlertComponent.Role.BUILDER:
+		return false
+	if _is_reserved_for_expansion(builder):
+		return false
+	var existing_index := _find_rail_order_index(builder)
+	if existing_index >= 0:
+		return true
+	var harvest := builder.get_component(HarvestComponent) as HarvestComponent
+	return alert.state == AlertComponent.State.IDLE and (harvest == null or harvest.can_start_construction())
+
+func _queue_rail_task(builder: Entity, task: Dictionary) -> void:
+	var index := _find_rail_order_index(builder)
+	if index < 0:
+		var alert := builder.get_component(AlertComponent) as AlertComponent
+		if alert != null:
+			alert.set_construction_active(true)
+		_rail_orders.append({"builder_id": builder.get_instance_id(), "tasks": [task]})
+		_start_current_rail_task(builder, task)
+		return
+	var order: Dictionary = _rail_orders[index]
+	var tasks: Array = order["tasks"]
+	tasks.append(task)
+	order["tasks"] = tasks
+	_rail_orders[index] = order
+
+func _update_rail_orders(delta: float) -> void:
+	for index in range(_rail_orders.size() - 1, -1, -1):
+		var order: Dictionary = _rail_orders[index]
+		var builder := instance_from_id(int(order["builder_id"])) as Entity
+		if builder == null or not is_instance_valid(builder):
+			_rail_orders.remove_at(index)
+			continue
+		var tasks: Array = order["tasks"]
+		if tasks.is_empty():
+			_finish_rail_order(index, builder)
+			continue
+		var task: Dictionary = tasks[0]
+		var segment := instance_from_id(int(task["segment_id"])) as Node2D
+		if segment == null or not is_instance_valid(segment):
+			tasks.pop_front()
+			order["tasks"] = tasks
+			_rail_orders[index] = order
+			continue
+		var movement := builder.get_component(MovementComponent) as MovementComponent
+		if movement == null:
+			_finish_rail_order(index, builder)
+			continue
+		if builder.global_position.distance_to(segment.global_position) > rail_work_radius:
+			if not movement.is_moving():
+				_issue_move_to_position(builder, _rail_work_position(builder, segment))
+			continue
+		if movement.is_moving():
+			movement.stop()
+		task["remaining"] = maxf(float(task["remaining"]) - delta, 0.0)
+		var progress := 1.0 - float(task["remaining"]) / maxf(float(task["total"]), 0.01)
+		if task["kind"] == "build":
+			var start_progress := float(task.get("start_progress", 0.0))
+			segment.call("set_construction_progress", lerpf(start_progress, 1.0, progress))
+		elif task["kind"] == "repair":
+			var start_health := float(task["start_health"])
+			var maximum_health: float = segment.get("maximum_health")
+			var desired_health := lerpf(start_health, maximum_health, progress)
+			segment.call("repair", desired_health - float(segment.get("current_health")))
+		tasks[0] = task
+		order["tasks"] = tasks
+		_rail_orders[index] = order
+		if float(task["remaining"]) > 0.0:
+			continue
+		if task["kind"] == "build":
+			segment.call("complete_construction")
+		else:
+			segment.call("repair", float(segment.get("maximum_health")))
+		tasks.pop_front()
+		if tasks.is_empty():
+			_finish_rail_order(index, builder)
+		else:
+			order["tasks"] = tasks
+			_rail_orders[index] = order
+			_start_current_rail_task(builder, tasks[0])
+
+func _start_current_rail_task(builder: Entity, task: Dictionary) -> void:
+	var segment := instance_from_id(int(task["segment_id"])) as Node2D
+	if segment != null and is_instance_valid(segment):
+		_issue_move_to_position(builder, _rail_work_position(builder, segment))
+
+func _rail_work_position(builder: Entity, segment: Node2D) -> Vector2:
+	var direction := segment.global_position.direction_to(builder.global_position)
+	if direction.length_squared() <= 0.001:
+		direction = Vector2.DOWN
+	return segment.global_position + direction * maxf(rail_work_radius - 8.0, 8.0)
+
+func _finish_rail_order(index: int, builder: Entity) -> void:
+	if index >= 0 and index < _rail_orders.size():
+		_rail_orders.remove_at(index)
+	var alert := builder.get_component(AlertComponent) as AlertComponent
+	if alert != null:
+		alert.set_construction_active(false)
+
+func _find_rail_order_index(builder: Entity) -> int:
+	if builder == null:
+		return -1
+	for index in range(_rail_orders.size()):
+		if int(_rail_orders[index]["builder_id"]) == builder.get_instance_id():
+			return index
+	return -1
+
+func _rail_segment_is_assigned(segment: Node2D) -> bool:
+	for order in _rail_orders:
+		for task in order["tasks"]:
+			if int(task["segment_id"]) == segment.get_instance_id():
+				return true
+	return false
 
 func _find_expansion_escorts(faction: Dictionary, builder: Entity) -> Array[Entity]:
 	var candidates: Array[Entity] = []
@@ -1028,6 +1245,10 @@ func _is_reserved_for_expansion(unit: Entity) -> bool:
 func _find_terrain_map() -> TerrainMap:
 	var maps := get_tree().get_nodes_in_group("terrain_maps")
 	return null if maps.is_empty() else maps[0] as TerrainMap
+
+func _find_rail_network() -> Node:
+	var networks := get_tree().get_nodes_in_group("rail_networks")
+	return null if networks.is_empty() else networks[0] as Node
 
 func _get_active_world_seed() -> int:
 	var seed_provider := get_node_or_null("/root/WorldSeed")

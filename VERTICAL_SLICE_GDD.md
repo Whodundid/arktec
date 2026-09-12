@@ -11,6 +11,19 @@
 
 *ArtifactRun* is a top-down action game in which the player works as a mercenary excavating ancient alien ruins for a profit-driven interplanetary corporation.
 
+### Current Prototype Decisions
+
+- The player's landing ship occupies exactly three world tiles horizontally and four vertically.
+- The landing ship, artifacts, and rail network use grid cells as their authoritative positions.
+- A generated mission contains one to three artifacts with Common, Rare, and Exotic rarity levels and at least one required mission objective.
+- Builders mine artifacts directly; mining does not require adjacent rail.
+- Buried artifacts are invulnerable. They become vulnerable when mining begins and remain vulnerable while waiting for rail or travelling.
+- Rail junctions initially allow a platform to continue straight or turn in any connected cardinal direction.
+- Rail placement is a persistent builder mode on `R`; each click queues another exact grid cell until right-click or Escape cancels placement.
+- Prototype rail defaults are 5 ore, 1.5 seconds to construct, 60 health, and 2.5 seconds to repair from fully broken. Zero-health rail remains in place but is inoperable until repaired.
+- Losing a required artifact removes full-success eligibility but does not immediately end the mission while another recovery or voluntary departure remains possible.
+- Departure requires the player to board the ship, request launch, and confirm the decision. The mission results are shown after confirmation.
+
 During the day, the player explores ruins, locates artifacts, expands infrastructure, and constructs defenses. At night, increasingly aggressive creatures emerge and attack the player's excavation operation.
 
 Excavating an artifact takes multiple in-game days. Once recovered, it must be transported by rail from the excavation site to a company-controlled outpost. Transporting alien technology enrages the creatures, turning delivery into a dangerous moving-defense encounter.

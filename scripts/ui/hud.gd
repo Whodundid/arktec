@@ -13,6 +13,7 @@ var _pending_build_builder: Entity
 const BUILD_SUPPLY := EnemySpawnerBuilding.BuildingType.SUPPLY
 const BUILD_BARRACKS := EnemySpawnerBuilding.BuildingType.BARRACKS
 const BUILD_MAIN := EnemySpawnerBuilding.BuildingType.MAIN
+const BUILD_RAIL := 100
 const TRAIN_GUARD := AlertComponent.Role.GUARD
 const TRAIN_BUILDER := AlertComponent.Role.BUILDER
 const TRAIN_FLANKER := AlertComponent.Role.FLANKER
@@ -27,6 +28,14 @@ func _input(event: InputEvent) -> void:
 	var selected_entities := _selected_entities()
 	var selected_builder := _selected_builder()
 	var selected_building := _selected_player_building()
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE and _build_mode >= 0:
+		_build_mode = -1
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT and _build_mode >= 0:
+		_build_mode = -1
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if _handle_gameplay_hotkey(event.keycode if event.keycode != KEY_NONE else event.physical_keycode, selected_builder, selected_building):
 			get_viewport().set_input_as_handled()
@@ -46,7 +55,7 @@ func _input(event: InputEvent) -> void:
 				return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and _build_mode >= 0:
 		var build_buttons := _build_button_rects()
-		var build_types := [BUILD_SUPPLY, BUILD_BARRACKS, BUILD_MAIN]
+		var build_types := [BUILD_SUPPLY, BUILD_BARRACKS, BUILD_MAIN, BUILD_RAIL]
 		for index in range(build_buttons.size()):
 			if build_buttons[index].has_point(event.position):
 				if ResourceLedger.can_afford(TeamComponent.Team.PLAYER, _get_build_cost(build_types[index])):
@@ -56,7 +65,9 @@ func _input(event: InputEvent) -> void:
 		var sandbox_nodes := get_tree().get_nodes_in_group("battle_sandboxes")
 		if selected_builder != null and not sandbox_nodes.is_empty():
 			var world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * event.position
-			if bool(sandbox_nodes[0].call("request_player_construction", selected_builder, world_position, _build_mode)):
+			if _build_mode == BUILD_RAIL:
+				sandbox_nodes[0].call("request_player_rail_construction", selected_builder, world_position)
+			elif bool(sandbox_nodes[0].call("request_player_construction", selected_builder, world_position, _build_mode)):
 				_pending_build_position = world_position
 				_pending_build_type = _build_mode
 				_pending_build_builder = selected_builder
@@ -171,13 +182,13 @@ func _draw() -> void:
 
 	if _build_mode >= 0 and _selected_builder() != null:
 		var build_buttons := _build_button_rects()
-		var build_panel := Rect2(build_buttons[0].position - Vector2(8, 12), Vector2(300, 58))
+		var build_panel := Rect2(build_buttons[0].position - Vector2(8, 12), Vector2(300, 108))
 		draw_style_box(_panel(Color("101b25"), Color("4d6f78")), build_panel)
-		var labels := ["SUPPLY", "BARRACKS", "COMMAND"]
-		var build_actions := ["build_supply", "build_barracks", "build_main"]
+		var labels := ["SUPPLY", "BARRACKS", "COMMAND", "RAIL"]
+		var build_actions := ["build_supply", "build_barracks", "build_main", "build_rail"]
 
 		for index in range(build_buttons.size()):
-			var building_type: int = [BUILD_SUPPLY, BUILD_BARRACKS, BUILD_MAIN][index]
+			var building_type: int = [BUILD_SUPPLY, BUILD_BARRACKS, BUILD_MAIN, BUILD_RAIL][index]
 			var affordable := ResourceLedger.can_afford(TeamComponent.Team.PLAYER, _get_build_cost(building_type))
 			_draw_build_button(build_buttons[index], "%s [%s]" % [labels[index], _user_settings().get_key_name(_user_settings().get_keybind(build_actions[index]))], _build_mode == building_type, affordable)
 			if build_buttons[index].has_point(get_viewport().get_mouse_position()):
@@ -278,8 +289,8 @@ func _handle_gameplay_hotkey(keycode: int, selected_builder: Entity, selected_bu
 				_request_training(selected_building, training_roles[index])
 				return true
 	if selected_builder != null:
-		var build_types := [BUILD_SUPPLY, BUILD_BARRACKS, BUILD_MAIN]
-		var build_actions := ["build_supply", "build_barracks", "build_main"]
+		var build_types := [BUILD_SUPPLY, BUILD_BARRACKS, BUILD_MAIN, BUILD_RAIL]
+		var build_actions := ["build_supply", "build_barracks", "build_main", "build_rail"]
 		for index in range(build_types.size()):
 			if keycode == _user_settings().get_keybind(build_actions[index]):
 				if ResourceLedger.can_afford(TeamComponent.Team.PLAYER, _get_build_cost(build_types[index])):
@@ -406,8 +417,13 @@ func _draw_command_button(rect: Rect2, label: String, active: bool) -> void:
 func _build_button_rects() -> Array[Rect2]:
 	@warning_ignore("shadowed_variable_base_class")
 	var size := get_viewport_rect().size
-	var origin := Vector2(size.x - 300.0, size.y - 112.0)
-	return [Rect2(origin, Vector2(92, 42)), Rect2(origin + Vector2(100, 0), Vector2(92, 42)), Rect2(origin + Vector2(200, 0), Vector2(92, 42))]
+	var origin := Vector2(size.x - 300.0, size.y - 160.0)
+	return [
+		Rect2(origin, Vector2(142, 42)),
+		Rect2(origin + Vector2(150, 0), Vector2(142, 42)),
+		Rect2(origin + Vector2(0, 50), Vector2(142, 42)),
+		Rect2(origin + Vector2(150, 50), Vector2(142, 42)),
+	]
 
 func _train_button_rects() -> Array[Rect2]:
 	@warning_ignore("shadowed_variable_base_class")
@@ -433,6 +449,9 @@ func _draw_building_preview_at(world_position: Vector2, building_type: int, show
 	if sandboxes.is_empty():
 		return
 	var sandbox := sandboxes[0]
+	if building_type == BUILD_RAIL:
+		_draw_rail_preview_at(world_position, sandbox, show_validity)
+		return
 	var footprint_scale := _get_building_footprint_scale(building_type)
 	var valid := true
 	if show_validity:
@@ -449,6 +468,27 @@ func _draw_building_preview_at(world_position: Vector2, building_type: int, show
 	draw_line(preview_rect.position, preview_rect.end, Color(color, 0.55), 1.0)
 	draw_line(Vector2(preview_rect.end.x, preview_rect.position.y), Vector2(preview_rect.position.x, preview_rect.end.y), Color(color, 0.55), 1.0)
 	var label := "CONSTRUCTION SITE" if not show_validity else ("VALID SITE" if valid else ("NEED ORE" if not ResourceLedger.can_afford(TeamComponent.Team.PLAYER, _get_build_cost(building_type)) else "BLOCKED"))
+	draw_string(small_font, preview_rect.position + Vector2(0.0, -8.0), label, HORIZONTAL_ALIGNMENT_CENTER, preview_rect.size.x, 11, color)
+
+func _draw_rail_preview_at(world_position: Vector2, sandbox: Node, show_validity: bool) -> void:
+	var snapped_position: Vector2 = sandbox.call("get_rail_cell_center", world_position)
+	var affordable := ResourceLedger.can_afford(TeamComponent.Team.PLAYER, _get_build_cost(BUILD_RAIL))
+	var valid := true
+	if show_validity:
+		valid = bool(sandbox.call("can_place_player_rail", world_position)) and affordable
+	var canvas_transform := get_viewport().get_canvas_transform()
+	var screen_position: Vector2 = canvas_transform * snapped_position
+	var zoom_scale := Vector2(canvas_transform.x.length(), canvas_transform.y.length())
+	var terrain_maps := get_tree().get_nodes_in_group("terrain_maps")
+	var tile_size := 64.0 if terrain_maps.is_empty() else float(terrain_maps[0].get("tile_size"))
+	var preview_size := Vector2.ONE * tile_size * zoom_scale
+	var preview_rect := Rect2(screen_position - preview_size * 0.5, preview_size)
+	var color := Color("77e28a") if valid else Color("e45b61")
+	draw_rect(preview_rect, Color(color, 0.2), true)
+	draw_rect(preview_rect, Color(color, 0.95), false, 2.0)
+	draw_line(Vector2(screen_position.x - preview_size.x * 0.38, screen_position.y), Vector2(screen_position.x + preview_size.x * 0.38, screen_position.y), color, 5.0)
+	draw_line(Vector2(screen_position.x, screen_position.y - preview_size.y * 0.38), Vector2(screen_position.x, screen_position.y + preview_size.y * 0.38), color, 5.0)
+	var label := "RAIL SITE" if not show_validity else ("VALID RAIL" if valid else ("NEED ORE" if not affordable else "BLOCKED"))
 	draw_string(small_font, preview_rect.position + Vector2(0.0, -8.0), label, HORIZONTAL_ALIGNMENT_CENTER, preview_rect.size.x, 11, color)
 
 func _get_building_footprint_scale(building_type: int) -> float:
@@ -479,6 +519,8 @@ func _get_build_cost(building_type: int) -> int:
 	if sandboxes.is_empty():
 		return 0
 	var sandbox := sandboxes[0]
+	if building_type == BUILD_RAIL:
+		return int(sandbox.call("get_rail_build_cost"))
 	if building_type == BUILD_SUPPLY:
 		return int(sandbox.get("supply_building_cost"))
 	if building_type == BUILD_BARRACKS:

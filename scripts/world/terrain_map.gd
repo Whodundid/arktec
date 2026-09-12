@@ -33,7 +33,7 @@ enum TileType {
 @export_group("Layered Generation")
 @export_range(0.01, 0.2, 0.005) var land_noise_frequency := 0.055
 @export_range(-0.8, 0.4, 0.05) var land_threshold := -0.22
-@export_range(0.0, 1.0, 0.05) var island_world_chance := 0.3
+@export_range(0.0, 1.0, 0.05) var island_world_chance := 0.5
 @export_range(0.0, 1.0, 0.05) var continental_edge_falloff := 0.14
 @export_range(0.01, 0.3, 0.005) var stone_noise_frequency := 0.105
 @export_range(0.0, 0.9, 0.05) var stone_threshold := 0.32
@@ -172,6 +172,8 @@ var _tile_heights: Array[Array] = []
 var _tree_spawn_positions: Array[Vector2] = []
 var _faction_spawn_positions: Array[Vector2] = []
 var _ore_spawn_positions: Array[Vector2] = []
+var _artifact_spawn_cells: Array[Vector2i] = []
+var _landing_ship_top_left_cell := Vector2i(-1, -1)
 var _terrain_render_texture: ImageTexture
 var _stone_occluder_root: Node2D
 var _height_shadow_layer: MultiMeshInstance2D
@@ -319,6 +321,8 @@ func _generate_layered_world() -> void:
 	_tree_spawn_positions.clear()
 	_faction_spawn_positions.clear()
 	_ore_spawn_positions.clear()
+	_artifact_spawn_cells.clear()
+	_landing_ship_top_left_cell = Vector2i(-1, -1)
 
 	var land_noise := _make_noise(_generation_seed ^ 0x4C414E, land_noise_frequency, 4)
 	var detail_noise := _make_noise(_generation_seed ^ 0x454C56, land_noise_frequency * 2.1, 2)
@@ -347,6 +351,12 @@ func _generate_layered_world() -> void:
 	_shuffle_positions(_tree_spawn_positions, random)
 	_generate_faction_spawn_layer()
 	_prune_tree_positions_near(_faction_spawn_positions, tile_size * 3.0)
+	_generate_mission_site_layer()
+	_prune_tree_positions_near(get_artifact_spawn_positions(), tile_size * 1.5)
+	# Trees are anchored at their trunks but can render several tiles upward.
+	# Keep trunks well away from the large ship footprint so foreground canopy
+	# does not hide the player's most important structure on arrival.
+	_prune_tree_positions_near(get_landing_ship_occupied_positions(), tile_size * 3.0)
 	_generate_ore_layer(ore_noise, random)
 	_prune_tree_positions_near(_ore_spawn_positions, tile_size * 1.5)
 
@@ -564,6 +574,79 @@ func _generate_faction_spawn_layer() -> void:
 	_faction_spawn_positions.append(cell_to_world(left_cell) + Vector2.ONE * tile_size * 0.5)
 	_faction_spawn_positions.append(cell_to_world(right_cell) + Vector2.ONE * tile_size * 0.5)
 
+func _generate_mission_site_layer() -> void:
+	var region := _largest_traversable_region()
+	if region.is_empty():
+		return
+	var random := RandomNumberGenerator.new()
+	random.seed = _generation_seed ^ 0x415254
+	var candidates: Array[Vector2i] = []
+	for cell in region:
+		if not _cell_has_open_radius(cell, 1):
+			continue
+		var position := cell_center(cell)
+		if not _position_is_spaced(position, _faction_spawn_positions, tile_size * 5.0):
+			continue
+		candidates.append(cell)
+	_shuffle_cells(candidates, random)
+	var artifact_count := random.randi_range(1, 3)
+	for cell in candidates:
+		if _artifact_spawn_cells.size() >= artifact_count:
+			break
+		var spaced := true
+		for other in _artifact_spawn_cells:
+			if Vector2(cell).distance_to(Vector2(other)) < 6.0:
+				spaced = false
+				break
+		if spaced:
+			_artifact_spawn_cells.append(cell)
+	_choose_landing_ship_site(region, random)
+
+func _choose_landing_ship_site(region: Array[Vector2i], random: RandomNumberGenerator) -> void:
+	const SHIP_SIZE := Vector2i(3, 4)
+	var best_cell := Vector2i(-1, -1)
+	var best_score := INF
+	for candidate in region:
+		if not _footprint_has_open_perimeter(candidate, SHIP_SIZE, 2):
+			continue
+		var center_cell := Vector2(candidate) + Vector2(SHIP_SIZE) * 0.5
+		var minimum_artifact_distance := INF
+		var average_artifact_distance := 0.0
+		for artifact_cell in _artifact_spawn_cells:
+			var distance := center_cell.distance_to(Vector2(artifact_cell) + Vector2.ONE * 0.5)
+			minimum_artifact_distance = minf(minimum_artifact_distance, distance)
+			average_artifact_distance += distance
+		if not _artifact_spawn_cells.is_empty():
+			average_artifact_distance /= float(_artifact_spawn_cells.size())
+		if minimum_artifact_distance < 18.0:
+			continue
+		var center_world := cell_to_world(candidate) + Vector2(SHIP_SIZE) * tile_size * 0.5
+		if not _position_is_spaced(center_world, _faction_spawn_positions, tile_size * 8.0):
+			continue
+		# Prefer a substantial trip without automatically choosing the single most
+		# remote corner. A tiny seeded jitter prevents repetitive layouts on broad
+		# areas whose distance scores are otherwise identical.
+		var score := absf(average_artifact_distance - 27.0) + random.randf_range(0.0, 1.5)
+		if score < best_score:
+			best_score = score
+			best_cell = candidate
+	if best_cell == Vector2i(-1, -1):
+		# Extremely fragmented custom maps may not satisfy the preferred distance.
+		# Retain grid alignment and a safe perimeter rather than failing the run.
+		for candidate in region:
+			if _footprint_has_open_perimeter(candidate, SHIP_SIZE, 2):
+				best_cell = candidate
+				break
+	_landing_ship_top_left_cell = best_cell
+
+func _footprint_has_open_perimeter(top_left: Vector2i, size: Vector2i, padding: int) -> bool:
+	for y in range(-padding, size.y + padding):
+		for x in range(-padding, size.x + padding):
+			var cell := top_left + Vector2i(x, y)
+			if not is_inside(cell) or not is_traversable(get_tile(cell)):
+				return false
+	return true
+
 func _generate_ore_layer(noise: FastNoiseLite, random: RandomNumberGenerator) -> void:
 	var candidates: Array[Dictionary] = []
 	for cell in _largest_traversable_region():
@@ -571,6 +654,10 @@ func _generate_ore_layer(noise: FastNoiseLite, random: RandomNumberGenerator) ->
 			continue
 		var position := cell_to_world(cell) + Vector2.ONE * tile_size * 0.5
 		if not _position_is_spaced(position, _faction_spawn_positions, tile_size * 4.0):
+			continue
+		if not _position_is_spaced(position, get_artifact_spawn_positions(), tile_size * 2.0):
+			continue
+		if not _position_is_spaced(position, get_landing_ship_occupied_positions(), tile_size * 2.0):
 			continue
 		candidates.append({"cell": cell, "score": noise.get_noise_2d(float(cell.x), float(cell.y)) + random.randf_range(-0.08, 0.08)})
 	candidates.sort_custom(func(first: Dictionary, second: Dictionary) -> bool:
@@ -632,6 +719,13 @@ func _shuffle_positions(positions: Array[Vector2], random: RandomNumberGenerator
 		positions[index] = positions[swap_index]
 		positions[swap_index] = held
 
+func _shuffle_cells(cells: Array[Vector2i], random: RandomNumberGenerator) -> void:
+	for index in range(cells.size() - 1, 0, -1):
+		var swap_index := random.randi_range(0, index)
+		var held := cells[index]
+		cells[index] = cells[swap_index]
+		cells[swap_index] = held
+
 func _prune_tree_positions_near(positions: Array[Vector2], radius: float) -> void:
 	var filtered: Array[Vector2] = []
 	for tree_position in _tree_spawn_positions:
@@ -647,6 +741,39 @@ func get_faction_spawn_positions(maximum_count: int = -1) -> Array[Vector2]:
 
 func get_ore_spawn_positions(maximum_count: int = -1) -> Array[Vector2]:
 	return _copy_positions(_ore_spawn_positions, maximum_count)
+
+func get_artifact_spawn_cells() -> Array[Vector2i]:
+	return _artifact_spawn_cells.duplicate()
+
+func get_artifact_spawn_positions() -> Array[Vector2]:
+	var positions: Array[Vector2] = []
+	for cell in _artifact_spawn_cells:
+		positions.append(cell_center(cell))
+	return positions
+
+func get_landing_ship_top_left_cell() -> Vector2i:
+	return _landing_ship_top_left_cell
+
+func get_landing_ship_center() -> Vector2:
+	if _landing_ship_top_left_cell == Vector2i(-1, -1):
+		return Vector2.ZERO
+	return cell_to_world(_landing_ship_top_left_cell) + Vector2(3.0, 4.0) * tile_size * 0.5
+
+func get_landing_ship_rail_receiver_cell() -> Vector2i:
+	if _landing_ship_top_left_cell == Vector2i(-1, -1):
+		return Vector2i(-1, -1)
+	# The ship is three cells wide, so its southern receiver has one exact
+	# center column. Rail may be built directly against this cell later.
+	return _landing_ship_top_left_cell + Vector2i(1, 4)
+
+func get_landing_ship_occupied_positions() -> Array[Vector2]:
+	var positions: Array[Vector2] = []
+	if _landing_ship_top_left_cell == Vector2i(-1, -1):
+		return positions
+	for y in range(4):
+		for x in range(3):
+			positions.append(cell_center(_landing_ship_top_left_cell + Vector2i(x, y)))
+	return positions
 
 func is_island_world() -> bool:
 	return _world_shape_is_island
@@ -923,6 +1050,9 @@ func _south_height_render_pixels(cell: Vector2i) -> int:
 
 func cell_to_world(cell: Vector2i) -> Vector2:
 	return map_origin + Vector2(cell) * tile_size
+
+func cell_center(cell: Vector2i) -> Vector2:
+	return cell_to_world(cell) + Vector2.ONE * tile_size * 0.5
 
 func world_to_cell(world_position: Vector2) -> Vector2i:
 	return Vector2i(floori((world_position.x - map_origin.x) / tile_size), floori((world_position.y - map_origin.y) / tile_size))

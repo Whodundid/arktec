@@ -20,7 +20,7 @@ var _rebinding_action := ""
 var _keybind_buttons: Dictionary = {}
 const KEYBIND_ACTIONS := [
 	["Train Guard", "train_guard"], ["Train Pursuer", "train_pursuer"], ["Train Flanker", "train_flanker"],
-	["Train Builder", "train_builder"], ["Build Supply", "build_supply"], ["Build Barracks", "build_barracks"], ["Build Command", "build_main"],
+	["Train Builder", "train_builder"], ["Build Supply", "build_supply"], ["Build Barracks", "build_barracks"], ["Build Command", "build_main"], ["Build Rail", "build_rail"],
 ]
 
 func _ready() -> void:

@@ -45,7 +45,7 @@ func spawn_unit() -> Entity:
 	unit.set("display_name", "Scout %d" % (_next_spawn_index + 1))
 	unit.set("body_color", Color("5fb8c2"))
 	unit.collision_layer = 2
-	unit.collision_mask = 15
+	unit.collision_mask = 31
 	get_tree().current_scene.add_child(unit)
 	var team := unit.get_component(TeamComponent) as TeamComponent
 	if team != null:
