@@ -94,6 +94,11 @@ func _configure_landing_ship() -> void:
 		collider.shape = ship_shape
 	var half_width := footprint_size.x * 0.5
 	var half_height := footprint_size.y * 0.5
+	var mouse_control := get_node_or_null("MouseControlComponent") as MouseControlComponent
+	if mouse_control != null:
+		# Selection is center-distance based, so use the footprint's half diagonal
+		# to make the entire landing ship comfortable to click.
+		mouse_control.selection_radius = footprint_size.length() * 0.5
 	var exit_clearance := landing_ship_tile_size * 0.75
 	spawn_positions = [
 		Vector2(-landing_ship_tile_size, half_height + exit_clearance),
@@ -628,10 +633,13 @@ func _draw() -> void:
 	draw_arc(Vector2.ZERO, territory_radius, 0.0, TAU, 64, Color(faction_color, 0.22), 2.0)
 	var visual_size := Vector2(landing_ship_grid_size) * landing_ship_tile_size if is_landing_ship else Vector2(60.0, 48.0)
 	var half_size := visual_size * 0.5
-	draw_selection_ring(maxf(40.0, half_size.length() * 0.76), 3.0)
 	if is_landing_ship:
 		_draw_landing_ship(faction_color, visual_size)
+		# The ship is much larger than ordinary buildings. Draw its selection
+		# indicator after the hull so the selected icon remains visible on top.
+		draw_selection_ring(maxf(40.0, half_size.length() * 0.76), 3.0)
 	else:
+		draw_selection_ring(maxf(40.0, half_size.length() * 0.76), 3.0)
 		draw_rect(Rect2(-half_size, visual_size), Color("293b46"), true)
 		draw_rect(Rect2(-half_size, visual_size), faction_color, false, 3.0)
 		draw_circle(Vector2.ZERO, 13.0, faction_color.darkened(0.35))

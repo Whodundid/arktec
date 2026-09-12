@@ -18,6 +18,24 @@ func _draw() -> void:
 	var group_controllers := get_tree().get_nodes_in_group("group_movement_controller")
 	if not group_controllers.is_empty():
 		var group_controller := group_controllers[0] as GroupMovementController
+		var order_path := group_controller.get_order_path_points()
+		if order_path.size() > 1:
+			var path_color := Color("f4d58b", 0.62)
+			var path_points := PackedVector2Array()
+			for path_point in order_path:
+				path_points.append(path_point)
+			draw_polyline(path_points, path_color, 2.0, true)
+		var queued_markers := group_controller.get_queued_order_markers()
+		for marker in queued_markers:
+			var queued_position: Vector2 = marker["destination"]
+			var queued_color := Color("f4d58b", 0.9)
+			draw_line(queued_position, queued_position + Vector2(0.0, -16.0), queued_color, 2.0)
+			draw_colored_polygon(PackedVector2Array([
+			queued_position + Vector2(0.0, -16.0),
+			queued_position + Vector2(15.0, -11.0),
+			queued_position + Vector2(0.0, -7.0),
+		]), queued_color)
+			draw_string(ThemeDB.fallback_font, queued_position + Vector2(14, 5), str(marker["index"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, queued_color)
 		if group_controller.has_attack_marker():
 			var attack_target := group_controller.get_attack_target()
 			var attack_alpha := group_controller.get_attack_marker_alpha()

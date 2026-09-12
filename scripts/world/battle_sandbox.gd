@@ -29,6 +29,7 @@ const FACTION_TERRITORY_SCRIPT = preload("res://scripts/world/faction_territory.
 @export_range(1.0, 1000.0, 1.0) var rail_maximum_health := 60.0
 @export_range(0.25, 10.0, 0.25) var rail_repair_duration := 2.5
 @export_range(16.0, 128.0, 1.0) var rail_work_radius := 96.0
+@export_range(4.0, 32.0, 1.0) var artifact_excavation_arrival_radius := 12.0
 @export_range(7.0, 16.0, 1.0) var expansion_min_distance_tiles := 8.0
 @export_range(2.0, 10.0, 1.0) var expansion_spacing_tiles := 4.0
 @export_range(5.0, 120.0, 5.0) var builder_expansion_cooldown := 45.0
@@ -56,6 +57,7 @@ var _wave_remaining: Array[float] = []
 var _random := RandomNumberGenerator.new()
 var _expansions: Array[Dictionary] = []
 var _rail_orders: Array[Dictionary] = []
+var _excavation_orders: Array[Dictionary] = []
 var _builder_cooldowns: Dictionary = {}
 var _attack_targets: Dictionary = {}
 var _ore_security_requests: Dictionary = {}
@@ -195,6 +197,7 @@ func _physics_process(delta: float) -> void:
 
 	_update_expansions(delta)
 	_update_rail_orders(delta)
+	_update_excavation_orders(delta)
 
 	if _strategic_tick_remaining <= 0.0:
 		_strategic_tick_remaining = strategic_tick_interval
@@ -609,7 +612,7 @@ func request_player_construction(builder: Entity, position: Vector2, building_ty
 	if team == null or team.team != TeamComponent.Team.PLAYER or alert == null or alert.role != AlertComponent.Role.BUILDER or alert.state != AlertComponent.State.IDLE:
 		return false
 	var faction := _find_faction_for_team(TeamComponent.Team.PLAYER)
-	if faction.is_empty() or not _find_available_builders(faction, false).has(builder) or _find_rail_order_index(builder) >= 0:
+	if faction.is_empty() or not _find_available_builders(faction, false).has(builder) or _find_rail_order_index(builder) >= 0 or _find_excavation_order_index(builder) >= 0:
 		return false
 	if building_type < EnemySpawnerBuilding.BuildingType.MAIN or building_type > EnemySpawnerBuilding.BuildingType.SUPPLY:
 		return false
@@ -673,7 +676,7 @@ func _find_available_builders(faction: Dictionary, apply_ai_restrictions: bool =
 			var alert := unit.get_component(AlertComponent) as AlertComponent
 			var cooldown := float(_builder_cooldowns.get(unit.get_instance_id(), 0.0)) if apply_ai_restrictions else 0.0
 			var harvest := unit.get_component(HarvestComponent) as HarvestComponent
-			if alert != null and alert.role == AlertComponent.Role.BUILDER and alert.state == AlertComponent.State.IDLE and cooldown <= 0.0 and not _is_reserved_for_expansion(unit) and _find_rail_order_index(unit) < 0 and (harvest == null or harvest.can_start_construction()):
+			if alert != null and alert.role == AlertComponent.Role.BUILDER and alert.state == AlertComponent.State.IDLE and cooldown <= 0.0 and not _is_reserved_for_expansion(unit) and _find_rail_order_index(unit) < 0 and _find_excavation_order_index(unit) < 0 and (harvest == null or harvest.can_start_construction()):
 				builders.append(unit)
 	return builders
 
@@ -703,6 +706,7 @@ func request_player_rail_construction(builder: Entity, world_position: Vector2) 
 	if segment == null:
 		ResourceLedger.add_ore(TeamComponent.Team.PLAYER, rail_cost)
 		return false
+	cancel_player_excavation_order(builder)
 	var task := {
 		"kind": "build",
 		"segment_id": segment.get_instance_id(),
@@ -742,8 +746,107 @@ func request_player_rail_work(builder: Entity, segment: Node2D) -> bool:
 			"total": maxf(duration, 0.01),
 			"start_health": current_health,
 		}
+	cancel_player_excavation_order(builder)
 	_queue_rail_task(builder, task)
 	return true
+
+func request_player_artifact_excavation(builder: Entity, artifact: Node2D) -> bool:
+	if not _can_assign_player_builder(builder) or not is_instance_valid(artifact) or not artifact.is_in_group("artifacts"):
+		return false
+	var existing_index := _find_excavation_order_index(builder)
+	if existing_index >= 0:
+		var existing_artifact := instance_from_id(int(_excavation_orders[existing_index]["artifact_id"])) as Node2D
+		if existing_artifact == artifact:
+			return true
+	if _artifact_is_assigned(artifact) or not bool(artifact.call("can_begin_excavation")):
+		return false
+	if existing_index >= 0:
+		cancel_player_excavation_order(builder)
+	cancel_player_rail_orders(builder)
+	var harvest := builder.get_component(HarvestComponent) as HarvestComponent
+	if harvest != null:
+		harvest.cancel_harvest_action()
+	if not bool(artifact.call("begin_excavation")):
+		return false
+	var alert := builder.get_component(AlertComponent) as AlertComponent
+	if alert != null:
+		alert.set_construction_active(true)
+	var work_position: Vector2 = artifact.call("get_excavation_work_position", builder.global_position, builder.collision_radius)
+	_excavation_orders.append({
+		"builder_id": builder.get_instance_id(),
+		"artifact_id": artifact.get_instance_id(),
+		"work_position": work_position,
+	})
+	_issue_move_to_position(builder, work_position)
+	return true
+
+func cancel_player_excavation_order(builder: Entity) -> bool:
+	var index := _find_excavation_order_index(builder)
+	if index < 0:
+		return false
+	var artifact := instance_from_id(int(_excavation_orders[index]["artifact_id"])) as Node2D
+	_excavation_orders.remove_at(index)
+	if artifact != null and is_instance_valid(artifact):
+		artifact.call("interrupt_excavation")
+	var alert := builder.get_component(AlertComponent) as AlertComponent
+	if alert != null:
+		alert.set_construction_active(false)
+	return true
+
+func has_player_excavation_order(builder: Entity) -> bool:
+	return _find_excavation_order_index(builder) >= 0
+
+func _update_excavation_orders(delta: float) -> void:
+	for index in range(_excavation_orders.size() - 1, -1, -1):
+		var order: Dictionary = _excavation_orders[index]
+		var builder := instance_from_id(int(order["builder_id"])) as Entity
+		var artifact := instance_from_id(int(order["artifact_id"])) as Node2D
+		if builder == null or not is_instance_valid(builder):
+			if artifact != null and is_instance_valid(artifact):
+				artifact.call("interrupt_excavation")
+			_excavation_orders.remove_at(index)
+			continue
+		if artifact == null or not is_instance_valid(artifact):
+			_finish_excavation_order(index, builder, false)
+			continue
+		var movement := builder.get_component(MovementComponent) as MovementComponent
+		if movement == null:
+			_finish_excavation_order(index, builder, true)
+			continue
+		var work_position: Vector2 = order["work_position"]
+		if builder.global_position.distance_to(work_position) > artifact_excavation_arrival_radius:
+			if not movement.is_moving():
+				_issue_move_to_position(builder, work_position)
+			continue
+		if movement.is_moving():
+			movement.stop()
+		if bool(artifact.call("advance_excavation", delta)):
+			_finish_excavation_order(index, builder, false)
+
+func _finish_excavation_order(index: int, builder: Entity, interrupt: bool) -> void:
+	if index < 0 or index >= _excavation_orders.size():
+		return
+	var artifact := instance_from_id(int(_excavation_orders[index]["artifact_id"])) as Node2D
+	_excavation_orders.remove_at(index)
+	if interrupt and artifact != null and is_instance_valid(artifact):
+		artifact.call("interrupt_excavation")
+	var alert := builder.get_component(AlertComponent) as AlertComponent
+	if alert != null:
+		alert.set_construction_active(false)
+
+func _find_excavation_order_index(builder: Entity) -> int:
+	if builder == null:
+		return -1
+	for index in range(_excavation_orders.size()):
+		if int(_excavation_orders[index]["builder_id"]) == builder.get_instance_id():
+			return index
+	return -1
+
+func _artifact_is_assigned(artifact: Node2D) -> bool:
+	for order in _excavation_orders:
+		if int(order["artifact_id"]) == artifact.get_instance_id():
+			return true
+	return false
 
 func cancel_player_rail_orders(builder: Entity) -> bool:
 	var index := _find_rail_order_index(builder)
@@ -766,6 +869,8 @@ func _can_assign_player_builder(builder: Entity) -> bool:
 		return false
 	var existing_index := _find_rail_order_index(builder)
 	if existing_index >= 0:
+		return true
+	if _find_excavation_order_index(builder) >= 0:
 		return true
 	var harvest := builder.get_component(HarvestComponent) as HarvestComponent
 	return alert.state == AlertComponent.State.IDLE and (harvest == null or harvest.can_start_construction())

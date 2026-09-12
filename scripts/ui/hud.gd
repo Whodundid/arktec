@@ -50,7 +50,7 @@ func _input(event: InputEvent) -> void:
 		var training_roles := _training_roles(selected_building)
 		for index in range(training_roles.size()):
 			if train_buttons[index].has_point(event.position):
-				_request_training(selected_building, training_roles[index])
+				_request_training(training_roles[index])
 				get_viewport().set_input_as_handled()
 				return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and _build_mode >= 0:
@@ -85,7 +85,7 @@ func _input(event: InputEvent) -> void:
 	var combat := _selected_combat()
 	if event is InputEventKey and event.pressed and not event.echo and combat != null:
 		if event.is_action_pressed("attack_move"):
-			var group_controller := _group_controller()
+			var group_controller: GroupMovementController = _group_controller()
 			if group_controller != null:
 				group_controller.arm_attack_move()
 			else:
@@ -93,7 +93,7 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		if event.is_action_pressed("hold_position"):
-			var group_controller := _group_controller()
+			var group_controller: GroupMovementController = _group_controller()
 			if group_controller != null:
 				group_controller.request_stance(CombatComponent.AUTO_HOLD_POSITION)
 			get_viewport().set_input_as_handled()
@@ -105,18 +105,18 @@ func _input(event: InputEvent) -> void:
 		return
 	var buttons := _command_button_rects()
 	if buttons[0].has_point(event.position):
-		var group_controller := _group_controller()
+		var group_controller: GroupMovementController = _group_controller()
 		if group_controller != null:
 			group_controller.request_stance(CombatComponent.AUTO_ATTACK_MOVE)
 		get_viewport().set_input_as_handled()
 	elif buttons[1].has_point(event.position):
-		var group_controller := _group_controller()
+		var group_controller: GroupMovementController = _group_controller()
 		if group_controller != null:
 			group_controller.request_stance(CombatComponent.AUTO_HOLD_POSITION)
 		get_viewport().set_input_as_handled()
 	elif combat.attack_move_armed:
 		var world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * event.position
-		var group_controller := _group_controller()
+		var group_controller: GroupMovementController = _group_controller()
 		if group_controller != null and group_controller.has_attack_move_armed():
 			group_controller.confirm_attack_move(world_position)
 		elif not combat.try_set_target_at(world_position):
@@ -164,6 +164,7 @@ func _draw() -> void:
 	var hovered_price_label := ""
 	var hovered_price_cost := 0
 	var selected_building := _selected_player_building()
+	var selected_buildings := _selected_player_buildings()
 	var training_roles := _training_roles(selected_building)
 
 	if selected_building != null and not training_roles.is_empty():
@@ -174,7 +175,11 @@ func _draw() -> void:
 		var train_actions := ["train_guard", "train_pursuer", "train_flanker"] if selected_building.building_type == EnemySpawnerBuilding.BuildingType.BARRACKS else ["train_builder"]
 		for index in range(training_roles.size()):
 			var can_pay := ResourceLedger.can_afford(TeamComponent.Team.PLAYER, selected_building.training_cost)
-			var queue_available := selected_building.get_training_queue_count() < selected_building.get_training_queue_limit()
+			var queue_available := false
+			for building in selected_buildings:
+				if building.get_training_queue_count() < building.get_training_queue_limit():
+					queue_available = true
+					break
 			_draw_build_button(train_buttons[index], "%s [%s]" % [train_labels[index], _user_settings().get_key_name(_user_settings().get_keybind(train_actions[index]))], false, can_pay and queue_available)
 			if train_buttons[index].has_point(get_viewport().get_mouse_position()):
 				hovered_price_label = train_labels[index]
@@ -257,9 +262,9 @@ func _selected_builder() -> Entity:
 	return selected_entity if alert != null and alert.role == AlertComponent.Role.BUILDER else null
 
 func _selected_player_building() -> EnemySpawnerBuilding:
-	var selected_entity := _selected_entity()
-	if selected_entity is EnemySpawnerBuilding and _is_player_owned(selected_entity):
-		return selected_entity as EnemySpawnerBuilding
+	for selected_entity in _selected_entities():
+		if selected_entity is EnemySpawnerBuilding and _is_player_owned(selected_entity):
+			return selected_entity as EnemySpawnerBuilding
 	return null
 
 func _training_roles(building: EnemySpawnerBuilding) -> Array:
@@ -286,7 +291,7 @@ func _handle_gameplay_hotkey(keycode: int, selected_builder: Entity, selected_bu
 		var training_actions := ["train_guard", "train_pursuer", "train_flanker"] if selected_building.building_type == EnemySpawnerBuilding.BuildingType.BARRACKS else ["train_builder"]
 		for index in range(training_roles.size()):
 			if keycode == _user_settings().get_keybind(training_actions[index]):
-				_request_training(selected_building, training_roles[index])
+				_request_training(training_roles[index])
 				return true
 	if selected_builder != null:
 		var build_types := [BUILD_SUPPLY, BUILD_BARRACKS, BUILD_MAIN, BUILD_RAIL]
@@ -298,9 +303,23 @@ func _handle_gameplay_hotkey(keycode: int, selected_builder: Entity, selected_bu
 				return true
 	return false
 
-func _request_training(building: EnemySpawnerBuilding, role: int) -> void:
-	if ResourceLedger.can_afford(TeamComponent.Team.PLAYER, building.training_cost) and building.get_training_queue_count() < building.get_training_queue_limit():
+func _request_training(role: int) -> void:
+	var buildings := _selected_player_buildings()
+	if buildings.is_empty():
+		return
+	for building in buildings:
+		if not ResourceLedger.can_afford(TeamComponent.Team.PLAYER, building.training_cost):
+			break
+		if building.get_training_queue_count() >= building.get_training_queue_limit():
+			continue
 		building.request_training(role)
+
+func _selected_player_buildings() -> Array[EnemySpawnerBuilding]:
+	var buildings: Array[EnemySpawnerBuilding] = []
+	for selected_entity in _selected_entities():
+		if selected_entity is EnemySpawnerBuilding and _is_player_owned(selected_entity):
+			buildings.append(selected_entity as EnemySpawnerBuilding)
+	return buildings
 
 func _user_settings() -> Node:
 	return get_node("/root/UserSettings")

@@ -18,6 +18,10 @@ Rail placement, construction, junction connectivity, breakage, repair, and artif
 
 `Godot_v4.7.2-stable_win64_console.exe --headless --path C:\Users\Hunter\QoT-Workspace\ArtifactRun res://tests/rail_construction_test.tscn`
 
+Artifact excavation, interruption persistence, vulnerability, and operational adjacent-rail readiness:
+
+`Godot_v4.7.2-stable_win64_console.exe --headless --path C:\Users\Hunter\QoT-Workspace\ArtifactRun res://tests/artifact_excavation_test.tscn`
+
 The deep movement profiler is disabled by default. Enable it from
 `ESC > Settings > Performance Capture` only for a diagnostic run. Samples are
 written once per second to `profile_*.jsonl` in that run's diagnostics folder.

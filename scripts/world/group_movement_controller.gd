@@ -7,6 +7,7 @@ extends Node2D
 @export var formation_enabled := false
 @export_range(16.0, 96.0, 1.0) var formation_spacing := 36.0
 @export_range(0.0, 2.0, 0.05) var arrival_footprint_scale := 0.75
+@export_range(16.0, 192.0, 4.0) var queued_order_arrival_radius := 96.0
 
 var _group_destination: Variant = null
 var _group_marker_remaining := 0.0
@@ -26,6 +27,8 @@ var _formation_elapsed := 0.0
 var _formation_duration := 0.0
 var _formation_group_speed := 0.0
 var _formation_retarget_remaining := 0.0
+var _queued_orders: Array[Dictionary] = []
+var _active_order: Dictionary = {}
 const FORMATION_RETARGET_INTERVAL := 0.12
 # Keep this smaller than the distance a formation travels between correction
 # ticks. Otherwise a unit can finish its temporary slot path, report no
@@ -45,11 +48,12 @@ func _process(delta: float) -> void:
 	_attack_marker_remaining = maxf(_attack_marker_remaining - delta, 0.0)
 	if _attack_marker_remaining <= 0.0:
 		_attack_target = null
-	if _group_marker_remaining <= 0.0:
+	if _group_marker_remaining <= 0.0 and not _has_persistent_order_marker():
 		_group_destination = null
 		_group_entities.clear()
 	_update_group_arrival()
 	_update_formation_motion(delta)
+	_advance_order_queue()
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F4:
@@ -74,6 +78,19 @@ func _input(event: InputEvent) -> void:
 		return
 
 	var world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * event.position
+	var artifact := _artifact_at(world_position)
+	if artifact != null:
+		var artifact_targeted := false
+		var artifact_sandboxes := get_tree().get_nodes_in_group("battle_sandboxes")
+		if not artifact_sandboxes.is_empty():
+			for entity in selected:
+				var alert := entity.get_component(AlertComponent) as AlertComponent
+				if alert != null and alert.role == AlertComponent.Role.BUILDER:
+					artifact_targeted = true
+					artifact_sandboxes[0].call("request_player_artifact_excavation", entity, artifact)
+		if artifact_targeted:
+			get_viewport().set_input_as_handled()
+			return
 	var rail_segment := _rail_segment_at(world_position)
 	if rail_segment != null and bool(rail_segment.call("needs_builder_work")):
 		var rail_work_ordered := false
@@ -88,13 +105,13 @@ func _input(event: InputEvent) -> void:
 			return
 	var target_building := _friendly_building_at(world_position)
 	if target_building != null:
-		_cancel_selected_rail_orders(selected)
-		NetworkSession.submit_command(COMMAND_CONTEXT_ORDER, _entity_ids(selected), {"destination": target_building.global_position, "building_id": target_building.network_entity_id, "formation": formation_enabled})
+		_cancel_selected_builder_orders(selected)
+		_submit_context_order(selected, target_building.global_position, {"building_id": target_building.network_entity_id}, event.shift_pressed)
 		get_viewport().set_input_as_handled()
 		return
 	var vein := _ore_vein_at(world_position)
 	if vein != null:
-		_cancel_selected_rail_orders(selected)
+		_cancel_selected_builder_orders(selected)
 		var harvest_ordered := false
 		for entity in selected:
 			var alert := entity.get_component(AlertComponent) as AlertComponent
@@ -106,9 +123,16 @@ func _input(event: InputEvent) -> void:
 			return
 	# A right-click on an enemy is an explicit attack order. Right-clicking
 	# elsewhere remains a manual move and ignores enemies encountered in range.
-	_cancel_selected_rail_orders(selected)
-	NetworkSession.submit_command(COMMAND_CONTEXT_ORDER, _entity_ids(selected), {"destination": world_position, "formation": formation_enabled})
+	_cancel_selected_builder_orders(selected)
+	_submit_context_order(selected, world_position, {}, event.shift_pressed)
 	get_viewport().set_input_as_handled()
+
+func _submit_context_order(selected: Array[Entity], destination: Vector2, extra_payload: Dictionary, queued: bool) -> void:
+	var payload := extra_payload.duplicate(true)
+	payload["destination"] = destination
+	payload["formation"] = formation_enabled
+	payload["queued"] = queued
+	NetworkSession.submit_command(COMMAND_CONTEXT_ORDER, _entity_ids(selected), payload)
 
 func _ore_vein_at(world_position: Vector2) -> OreVein:
 	var closest: OreVein
@@ -131,7 +155,13 @@ func _rail_segment_at(world_position: Vector2) -> Node2D:
 		return null
 	return networks[0].call("get_segment_at_world", world_position) as Node2D
 
-func _cancel_selected_rail_orders(selected: Array[Entity]) -> void:
+func _artifact_at(world_position: Vector2) -> Node2D:
+	for candidate in get_tree().get_nodes_in_group("artifacts"):
+		if candidate is Node2D and is_instance_valid(candidate) and bool(candidate.call("contains_world_position", world_position)):
+			return candidate as Node2D
+	return null
+
+func _cancel_selected_builder_orders(selected: Array[Entity]) -> void:
 	var sandboxes := get_tree().get_nodes_in_group("battle_sandboxes")
 	if sandboxes.is_empty():
 		return
@@ -139,6 +169,7 @@ func _cancel_selected_rail_orders(selected: Array[Entity]) -> void:
 		var alert := entity.get_component(AlertComponent) as AlertComponent
 		if alert != null and alert.role == AlertComponent.Role.BUILDER:
 			sandboxes[0].call("cancel_player_rail_orders", entity)
+			sandboxes[0].call("cancel_player_excavation_order", entity)
 
 func _friendly_building_at(world_position: Vector2) -> EnemySpawnerBuilding:
 	var closest: EnemySpawnerBuilding
@@ -194,16 +225,26 @@ func is_formation_enabled() -> bool:
 	return formation_enabled
 
 func has_group_marker() -> bool:
-	return _group_destination != null and _group_marker_remaining > 0.0
+	return _group_destination != null and (_group_marker_remaining > 0.0 or _has_persistent_order_marker())
 
 func get_group_destination() -> Variant:
 	return _group_destination
 
 func get_group_marker_alpha() -> float:
+	if _has_persistent_order_marker():
+		return 1.0
 	return clampf(_group_marker_remaining / 0.5, 0.0, 1.0)
 
 func get_group_marker_color() -> Color:
-	return Color("5ee27a")
+	return Color("f4d58b")
+
+func _has_persistent_order_marker() -> bool:
+	if not _queued_orders.is_empty():
+		return true
+	if _active_order.is_empty():
+		return false
+	var payload: Dictionary = _active_order.get("payload", {})
+	return bool(payload.get("queued", false))
 
 func has_attack_marker() -> bool:
 	return is_instance_valid(_attack_target) and _attack_marker_remaining > 0.0
@@ -219,6 +260,26 @@ func is_entity_in_group_order(entity: Entity) -> bool:
 
 func is_entity_in_formation(entity: Entity) -> bool:
 	return _formation_entities.has(entity)
+
+func get_queued_order_markers() -> Array[Dictionary]:
+	var markers: Array[Dictionary] = []
+	for index in range(_queued_orders.size()):
+		var payload: Dictionary = _queued_orders[index].get("payload", {})
+		var destination: Variant = payload.get("destination")
+		if destination is Vector2:
+			markers.append({"destination": destination, "index": index + 1})
+	return markers
+
+func get_order_path_points() -> Array[Vector2]:
+	var points: Array[Vector2] = []
+	if not _active_order.is_empty():
+		var active_payload: Dictionary = _active_order.get("payload", {})
+		var active_destination: Variant = active_payload.get("destination")
+		if active_destination is Vector2:
+			points.append(active_destination as Vector2)
+	for marker in get_queued_order_markers():
+		points.append(marker["destination"] as Vector2)
+	return points
 
 func _selected_player_entities() -> Array[Entity]:
 	var selected: Array[Entity] = []
@@ -248,6 +309,7 @@ func confirm_attack_move(destination: Vector2) -> void:
 	var selected := _selected_player_entities()
 	if not _has_attack_move_armed(selected):
 		return
+	_cancel_selected_builder_orders(selected)
 	NetworkSession.submit_command(COMMAND_ATTACK_MOVE, _entity_ids(selected), {"destination": destination, "formation": formation_enabled})
 
 func request_stance(mode: int) -> void:
@@ -262,24 +324,104 @@ func _on_network_command(sender_peer_id: int, command_type: StringName, entity_i
 	var entities := _resolve_owned_entities(sender_peer_id, entity_ids)
 	if entities.is_empty():
 		return
+	var queued := bool(payload.get("queued", false))
+	var order := {"command_type": command_type, "entities": entities.duplicate(), "payload": payload.duplicate(true)}
+	if queued and not _active_order.is_empty():
+		_queued_orders.append(order)
+		return
+	_clear_order_queue()
+	_active_order = order
 
+	_execute_order(command_type, entities, payload)
+
+func _clear_order_queue() -> void:
+	_queued_orders.clear()
+	_active_order.clear()
+
+func _advance_order_queue() -> void:
+	if _active_order.is_empty():
+		return
+	var active_payload: Dictionary = _active_order.get("payload", {})
+	var destination: Variant = active_payload.get("destination")
+	if not destination is Vector2:
+		return
+	var entities: Array[Entity] = _active_order.get("entities", [])
+	var accepted_destinations: Array[Vector2] = [destination as Vector2]
+	var resolved_destination: Variant = _active_order.get("resolved_destination")
+	if resolved_destination is Vector2:
+		accepted_destinations.append(resolved_destination as Vector2)
+	var arrival_radius := queued_order_arrival_radius
+	if bool(active_payload.get("formation", false)):
+		# A formation occupies more space around the clicked center than a single
+		# unit. Scale the acceptance radius with the selected group's footprint so
+		# the next order does not begin while the rear of the group is still
+		# settling into place.
+		arrival_radius = maxf(arrival_radius, formation_spacing * sqrt(float(entities.size())) * 0.75)
+	var complete := true
+	for entity in entities:
+		if is_instance_valid(entity):
+			var movement := entity.get_component(MovementComponent) as MovementComponent
+			var inside_arrival_radius := false
+			for accepted_destination in accepted_destinations:
+				if entity.global_position.distance_to(accepted_destination) <= arrival_radius:
+					inside_arrival_radius = true
+					break
+			if not inside_arrival_radius:
+				if movement != null and movement.is_moving():
+					complete = false
+					break
+				# A failed/stuck path must not silently advance the queue while the unit
+				# is still outside the clicked location's acceptance radius.
+				complete = false
+				break
+	if not complete:
+		return
+	# Do not stop early arrivals while the rest of the group is still traveling.
+	# They must remain free to settle naturally until every unit is inside the
+	# acceptance radius, then the whole group is stopped together.
+	for entity in entities:
+		if is_instance_valid(entity):
+			var movement := entity.get_component(MovementComponent) as MovementComponent
+			if movement != null:
+				movement.stop()
+	# The movement components are the source of truth for arrival. Formation and
+	# group-arrival bookkeeping can legitimately linger for a frame after every
+	# unit has stopped, and must not strand the next queued order behind it.
+	_clear_group_arrival()
+	if not _formation_entities.is_empty():
+		_clear_formation_motion()
+	_active_order.clear()
+	if _queued_orders.is_empty():
+		return
+	var next_order: Dictionary = _queued_orders.pop_front()
+	var next_entities: Array[Entity] = next_order.get("entities", [])
+	if next_entities.is_empty():
+		return
+	_active_order = next_order
+	_execute_order(next_order.get("command_type", COMMAND_CONTEXT_ORDER), next_entities, next_order.get("payload", {}))
+
+func _execute_order(command_type: StringName, entities: Array[Entity], payload: Dictionary) -> void:
 	if command_type == COMMAND_STANCE:
 		var mode := int(payload.get("mode", -1))
 		if mode != CombatComponent.AUTO_ATTACK_MOVE and mode != CombatComponent.AUTO_HOLD_POSITION:
+			_active_order.clear()
 			return
 		for entity in entities:
 			var combat := entity.get_component(CombatComponent) as CombatComponent
 			if combat != null:
 				combat.set_auto_target_mode(mode)
+		_active_order.clear()
 		return
-
 	var destination_value: Variant = payload.get("destination")
 	if not destination_value is Vector2:
+		_active_order.clear()
 		return
 	var destination := destination_value as Vector2
 	if not destination.is_finite():
+		_active_order.clear()
 		return
 	var building_id := int(payload.get("building_id", 0))
+	_cancel_selected_builder_orders(entities)
 	if building_id > 0 and _issue_building_order(entities, building_id):
 		return
 	_cancel_harvesting_orders(entities)
@@ -288,6 +430,7 @@ func _on_network_command(sender_peer_id: int, command_type: StringName, entity_i
 	if command_type == COMMAND_CONTEXT_ORDER:
 		if not _try_issue_attack(entities, destination):
 			_issue_move(entities, destination)
+			_remember_resolved_destination()
 	else:
 		for entity in entities:
 			var combat := entity.get_component(CombatComponent) as CombatComponent
@@ -295,7 +438,13 @@ func _on_network_command(sender_peer_id: int, command_type: StringName, entity_i
 				combat.arm_attack_move()
 		if not _try_issue_attack(entities, destination):
 			_confirm_attack_move(entities, destination)
+			_remember_resolved_destination()
 	formation_enabled = previous_formation_mode
+
+func _remember_resolved_destination() -> void:
+	if _active_order.is_empty() or not _group_destination is Vector2:
+		return
+	_active_order["resolved_destination"] = _group_destination
 
 func _cancel_harvesting_orders(entities: Array[Entity]) -> void:
 	for entity in entities:
@@ -432,6 +581,7 @@ func _issue_move(selected: Array[Entity], destination: Vector2) -> void:
 	_group_marker_remaining = 0.5
 	var destinations := _formation_destinations(selected, destination) if formation_enabled else _free_move_destinations(selected, destination)
 	var actual_destinations: Array[Vector2] = []
+	var resolved_destinations: Array[Vector2] = []
 
 	for index in range(selected.size()):
 		var entity := selected[index]
@@ -442,13 +592,19 @@ func _issue_move(selected: Array[Entity], destination: Vector2) -> void:
 		if entity.global_position.distance_to(destinations[index]) <= movement.stopping_distance + arrival_buffer:
 			movement.stop()
 			actual_destinations.append(entity.global_position)
+			resolved_destinations.append(entity.global_position)
 			continue
 		movement.move_to(destinations[index], arrival_buffer)
 		var resolved_destination: Variant = movement.get_destination_position()
 		if resolved_destination != null:
 			actual_destinations.append(resolved_destination as Vector2)
+			resolved_destinations.append(resolved_destination as Vector2)
 		else:
-			actual_destinations.append(entity.global_position)
+			# Keep formation speed calculation stable, but do not report this
+			# position as a successful navigation destination. A failed move_to()
+			# must not let queued-order completion treat the unit's current position
+			# as the waypoint it was asked to reach.
+			actual_destinations.append(destinations[index])
 
 	if formation_enabled:
 		var slowest_travel_time := 0.0
@@ -462,11 +618,11 @@ func _issue_move(selected: Array[Entity], destination: Vector2) -> void:
 				var distance := selected[index].global_position.distance_to(actual_destinations[index])
 				movement.set_formation_speed_pixels_per_second(distance / slowest_travel_time)
 
-	if not actual_destinations.is_empty():
+	if not resolved_destinations.is_empty():
 		var destination_sum := Vector2.ZERO
-		for actual_destination in actual_destinations:
-			destination_sum += actual_destination
-		_group_destination = destination_sum / float(actual_destinations.size())
+		for resolved_destination in resolved_destinations:
+			destination_sum += resolved_destination
+		_group_destination = destination_sum / float(resolved_destinations.size())
 	_arm_group_arrival(selected, _group_destination as Vector2)
 	if formation_enabled:
 		_clear_group_arrival()
@@ -600,7 +756,11 @@ func _has_matching_formation_layout(entities: Array[Entity]) -> bool:
 	return _formation_layout_offsets.size() == entities.size()
 
 func _arm_group_arrival(entities: Array[Entity], destination: Vector2) -> void:
-	if entities.is_empty() or formation_enabled:
+	# Controller-managed orders use _advance_order_queue() as the single arrival
+	# authority. The legacy averaged-destination watcher can stop a group around
+	# its current center when one path fails, which strands the queued order far
+	# from the clicked waypoint.
+	if entities.is_empty() or formation_enabled or not _active_order.is_empty():
 		return
 	_active_group_entities = entities.duplicate()
 	_active_group_destination = destination

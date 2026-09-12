@@ -61,8 +61,8 @@ func _select_entities_in_box() -> void:
 
 	# Marquee selection is unit-first: buildings inside a mixed drag are not
 	# included, so a formation can be selected without accidentally selecting a
-	# nearby Command Center. If the box contains buildings only, select the one
-	# closest to the box center rather than selecting the whole cluster.
+	# nearby Command Center. If the box contains buildings only, select every
+	# building of the type nearest the box center.
 	if not unit_selectables.is_empty():
 		_clear_selection()
 		for selectable in unit_selectables:
@@ -82,7 +82,11 @@ func _select_entities_in_box() -> void:
 			closest_distance = distance
 			closest_building = selectable
 	_clear_selection()
-	closest_building.set_selected(true)
+	var selected_building := closest_building.entity as EnemySpawnerBuilding
+	for selectable in building_selectables:
+		var building := selectable.entity as EnemySpawnerBuilding
+		if selected_building == null or building == null or building.building_type == selected_building.building_type:
+			selectable.set_selected(true)
 
 func _select_entity_at(screen_position: Vector2) -> void:
 	var mouse_world_position := get_viewport().get_canvas_transform().affine_inverse() * screen_position
